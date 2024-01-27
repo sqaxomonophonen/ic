@@ -1,86 +1,391 @@
 #include <assert.h>
 
-#include "iced_nodedef.h"
+#include "stb_ds.h"
 
+#include "iced_nodedef.h"
 
 static bool in_node = false;
 
+static struct nodedef* nodedef_arr;
+static struct nodedef def;
 
-static void node(const char* name)
+static void nodedef(enum nodedef_type type, const char* name)
 {
 	assert(!in_node);
 	in_node = true;
-	// TODO
+	memset(&def, 0, sizeof def);
+	def.type = type;
+	def.name = name;
 }
 
-static void endnode(void)
+static void nodedef_end(void)
 {
 	assert(in_node);
+	assert(def.name != NULL);
+	switch (def.type) {
+	case SDF3D:
+		assert(def.sdf3d.glsl_sdf3d != NULL);
+		break;
+	case SDF2D:
+		assert(def.sdf2d.glsl_sdf2d != NULL);
+		break;
+	case TX3D:
+		assert(def.tx3d.glsl_tx3d != NULL);
+		break;
+	case TX2D:
+		assert(def.tx2d.glsl_tx2d != NULL);
+		break;
+	case VOLUMIZE:
+		assert(def.volumize.glsl_tx != NULL);
+		break;
+	case D1:
+		assert(def.d1.glsl_d1 != NULL);
+		break;
+	case D2:
+		assert(def.d2.glsl_d2 != NULL);
+		break;
+	default: assert(!"unhandled type");
+	}
+	arrput(nodedef_arr, def);
 	in_node = false;
-	// TODO
 }
 
-static void sdf3d_glsl(const char* src)
+static void glsl_sdf3d(const char* src)
 {
 	assert(in_node);
-	// TODO
+	assert(def.type == SDF3D);
+	assert(def.sdf3d.glsl_sdf3d == NULL);
+	def.sdf3d.glsl_sdf3d = src;
 }
 
-static void sdf2d_glsl(const char* src)
+static void glsl_sdf2d(const char* src)
 {
 	assert(in_node);
-	// TODO
+	assert(def.type == SDF2D);
+	assert(def.sdf2d.glsl_sdf2d == NULL);
+	def.sdf2d.glsl_sdf2d = src;
 }
 
-static void radius(int argidx)
+static void glsl_tx3d(const char* src)
 {
 	assert(in_node);
-	// TODO
+	assert(def.type == TX3D);
+	assert(def.tx3d.glsl_tx3d == NULL);
+	def.tx3d.glsl_tx3d = src;
 }
 
-static void dim3(int argidx)
+static void glsl_tx2d(const char* src)
 {
 	assert(in_node);
-	// TODO
+	assert(def.type == TX2D);
+	assert(def.tx2d.glsl_tx2d == NULL);
+	def.tx2d.glsl_tx2d = src;
+}
+
+static void glsl_tx(const char* src)
+{
+	assert(in_node);
+	assert(def.type == VOLUMIZE);
+	assert(def.volumize.glsl_tx== NULL);
+	def.volumize.glsl_tx = src;
+}
+
+static void glsl_d1(const char* src)
+{
+	assert(in_node);
+	if (def.type == TX2D) {
+		assert(def.tx2d.glsl_d1 == NULL);
+		def.tx2d.glsl_d1 = src;
+	} else if (def.type == TX3D) {
+		assert(def.tx3d.glsl_d1 == NULL);
+		def.tx3d.glsl_d1 = src;
+	} else if (def.type == VOLUMIZE) {
+		assert(def.volumize.glsl_d1 == NULL);
+		def.volumize.glsl_d1  = src;
+	} else if (def.type == D1) {
+		assert(def.d1.glsl_d1 == NULL);
+		def.d1.glsl_d1  = src;
+	} else {
+		assert(!"bad type");
+	}
+}
+
+static void glsl_d2(const char* src)
+{
+	assert(in_node);
+	assert(def.type == D2);
+	assert(def.d2.glsl_d2 == NULL);
+	def.d2.glsl_d2 = src;
+}
+
+static void glsl_d2m(const char* src)
+{
+	assert(in_node);
+	assert(def.type == D2);
+	assert(def.d2.glsl_d2m == NULL);
+	def.d2.glsl_d2m = src;
+}
+
+static void arg(const char* name, enum nodedef_arg_type type, int argidx)
+{
+	assert(0 <= argidx && argidx < NODEDEF_MAX_ARGS);
+	if (argidx >= def.n_args) def.n_args = argidx + 1;
+	struct nodedef_arg* a = &def.args[argidx];
+	a->name = name;
+	a->type = type;
+}
+
+static void affine_translate_3d(gbMat4* m, union nodearg* args)
+{
+	gb_mat4_translate(m, args[0].v3);
+}
+
+static void affine_translate_2d(gbMat4* m, union nodearg* args)
+{
+	gb_mat4_translate(m, gb_vec3(args[0].v2.x, args[0].v2.y, 0));
+}
+
+static void affine_scale_3d(gbMat4* m, union nodearg* args)
+{
+	gb_mat4_scale(m, gb_vec3(args[0].f1, args[0].f1, args[0].f1));
+}
+
+static void affine_scale_2d(gbMat4* m, union nodearg* args)
+{
+	gb_mat4_scale(m, gb_vec3(args[0].f1, args[0].f1, 1));
+}
+
+static void fn_affine_3d(void (*fn)(gbMat4* m, union nodearg* args))
+{
+	assert(def.type == TX3D);
+	assert(def.tx3d.fn_affine == NULL);
+	def.tx3d.fn_affine = fn;
+}
+
+static void fn_affine_2d(void (*fn)(gbMat4* m, union nodearg* args))
+{
+	assert(def.type == TX2D);
+	assert(def.tx2d.fn_affine == NULL);
+	def.tx2d.fn_affine = fn;
 }
 
 void nodedef_init(void)
 {
-	node("sphere_3d");
-	radius(1);
-	sdf3d_glsl(
+	nodedef(SDF3D, "sphere_3d");
+	arg("radius", RADIUS, 0);
+	glsl_sdf3d(
 	"float FN(vec3 p, float r)\n"
 	"{\n"
 	"	return length(p)-r;\n"
 	"}\n"
 	);
-	endnode();
+	nodedef_end();
 
-	node("box_3d");
-	dim3(1);
-	sdf3d_glsl(
+	/////////////////////////
+
+	nodedef(SDF3D, "box_3d");
+	arg("dimensions", DIM3D, 0);
+	glsl_sdf3d(
 	"float FN(vec3 p, vec3 b)\n"
 	"{\n"
 	"	vec3 q = abs(p) - b;\n"
 	"	return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);\n"
 	"}\n"
 	);
-	endnode();
+	nodedef_end();
 
-	node("circle_2d");
-	radius(1);
-	sdf2d_glsl(
+	/////////////////////////
+
+	nodedef(SDF2D, "circle_2d");
+	arg("radius", RADIUS, 0);
+	glsl_sdf2d(
 	"float FN(vec2 p, float r)\n"
 	"{\n"
 	"	return length(p)-r;\n"
 	"}\n"
 	);
-	endnode();
+	nodedef_end();
 
-	// TODO
-	//procedure
-	//set_material
-	//affine_2d
+	/////////////////////////
+
+	nodedef(TX3D, "translate_3d");
+	arg("translation", POS3D, 0);
+	glsl_tx3d(
+	"vec3 FN(vec3 p, vec3 r)\n"
+	"{\n"
+	"	return p + r;\n"
+	"}\n"
+	);
+	fn_affine_3d(affine_translate_3d);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(TX2D, "translate_2d");
+	arg("translation", POS2D, 0);
+	glsl_tx2d(
+	"vec2 FN(vec2 p, vec2 r)\n"
+	"{\n"
+	"	return p + r;\n"
+	"}\n"
+	);
+	fn_affine_2d(affine_translate_2d);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(TX3D, "scale_3d");
+	arg("scaling", SCALAR, 0);
+	glsl_tx3d(
+	"vec3 FN(vec3 p, float s)\n"
+	"{\n"
+	"	return p / s;\n"
+	"}\n"
+	);
+	glsl_d1(
+	"float FN(vec3 _p, float d, float s)\n"
+	"{\n"
+	"	return d * s;\n"
+	"}\n"
+	);
+	fn_affine_3d(affine_scale_3d);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(TX2D, "scale_2d");
+	arg("scaling", SCALAR, 0);
+	glsl_tx2d(
+	"vec2 FN(vec2 p, float s)\n"
+	"{\n"
+	"	return p / s;\n"
+	"}\n"
+	);
+	glsl_d1(
+	"float FN(vec3 _p, float d, float s)\n"
+	"{\n"
+	"	return d * s;\n"
+	"}\n"
+	);
+	fn_affine_2d(affine_scale_2d);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(D1, "round");
+	arg("size", SCALAR, 0);
+	glsl_d1(
+	"float FN(float d, float r)\n"
+	"{\n"
+	"	return d - r;\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(D1, "onion");
+	arg("thickness", SCALAR, 0);
+	glsl_d1(
+	"float FN(float d, float r)\n"
+	"{\n"
+	"	return abs(d) - r;\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(D2, "union");
+	glsl_d2(
+	"float FN(float d0, float d1)\n"
+	"{\n"
+	"	return min(d0, d1);\n"
+	"}\n"
+	);
+	glsl_d2m(
+	"MAT FN(float d0, float d1, MAT m0, MAT m1)\n"
+	"{\n"
+	"	return d0 < d1 ? m0 : m1;\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(D2, "smooth_union");
+	arg("size", SCALAR, 0);
+	glsl_d2(
+	"float FN(float d0, float d1, float k)\n"
+	"{\n"
+	"	float h = clamp(0.5 + 0.5*(d1-d0)/k, 0.0, 1.0);\n"
+	"	return mix(d1, d0, h) - k*h*(1.0-h);\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(D2, "displace");
+	glsl_d2(
+	"float FN(float d0, float d1)\n"
+	"{\n"
+	"	return d0 + d1;\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(VOLUMIZE, "extrude");
+	arg("depth", SCALAR, 0);
+	glsl_tx(
+	"vec2 FN(vec3 p, float h)\n"
+	"{\n"
+	"	return p.xy;\n"
+	"}\n"
+	);
+	glsl_d1(
+	"float FN(vec3 p, float d, float h)\n"
+	"{\n"
+	"	vec2 w = vec2(d, abs(p.z) - h);\n"
+	"	return min(max(w.x,w.y),0.0) + length(max(w,0.0));\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(VOLUMIZE, "revolve");
+	arg("offset", SCALAR, 0);
+	glsl_tx(
+	"vec2 FN(vec3 p, float o)\n"
+	"{\n"
+	"	return vec2(length(p.xz) - o, p.y);\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	/////////////////////////
+
+	nodedef(TX3D, "elongate");
+	arg("extent", DIM3D, 0);
+	glsl_tx3d(
+	"vec3 FN(vec3 p, vec3 dim)\n"
+	"{\n"
+	"	return max(abs(p) - dim, 0.0);\n"
+	"}\n"
+	);
+	glsl_d1(
+	"vec3 FN(vec3 p, float d, vec3 dim)\n"
+	"{\n"
+	"	vec3 q = abs(p) - dim;\n"
+	"	return min(max(q.x,max(q.y,q.z)),0.0) + d;\n"
+	"}\n"
+	);
+	nodedef_end();
+
+	// TODO "standard" node defs?
 	//round_box_2d
 	//box_2d
 	//oriented_box_2d
@@ -121,11 +426,10 @@ void nodedef_init(void)
 	//stairs_2d
 	//hyperbola_2d
 	//circle_wave_2d
-	//affine_3d
 	//torus_3d
 	//capped_torus_3d
 	//link_3d
-	//infinte_cylinder_3d
+	//infinite_cylinder_3d
 	//cone_3d
 	//bound_cone_3d
 	//infinte_cone_3d
@@ -153,27 +457,13 @@ void nodedef_init(void)
 	//pyramid_3d
 	//triangle_3d
 	//quad_3d
-	//revolve
-	//extrude
-	//elongate0
-	//elongate1
-	//round
-	//onion
-	//union
 	//subtract
 	//intersect
-	//smooth_union
 	//smooth_subtract
 	//smooth_intersect
 	//symmetry
 	//repeat
 	//limit_repeat
-	//displace
 	//twist
 	//bend
-	//raymarch
-	//render
-	//optimize
-	//navmesh_gen
-	//entity
 }

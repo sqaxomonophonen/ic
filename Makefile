@@ -11,7 +11,7 @@ all: iced_sdl2_opengl4
 
 IMGUI_OBJS=imgui.o imgui_widgets.o imgui_tables.o imgui_draw.o imgui_impl_sdl2.o imgui_impl_opengl4.o
 
-iced_sdl2_opengl4: iced_main_sdl2_opengl4.o iced.o iced_nodedef.o gl3w.o $(IMGUI_OBJS)
+iced_sdl2_opengl4: iced_main_sdl2_opengl4.o iced.o iced_nodedef.o gl3w.o gb_math.o stb_ds.o $(IMGUI_OBJS)
 	$(CXX) $^ $(LDLIBS) -o $@
 
 clean:
