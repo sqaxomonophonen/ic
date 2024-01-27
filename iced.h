@@ -102,5 +102,7 @@ struct nodedef {
 void iced_init(void);
 void iced_gui(void);
 
+void nodedef_init(void);
+
 #define ICED_H
 #endif

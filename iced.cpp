@@ -4,7 +4,6 @@
 #include "imgui.h"
 #include "util.h"
 #include "iced.h"
-#include "iced_nodedef.h"
 
 static bool show_window_scene_tree = true;
 

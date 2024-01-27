@@ -2,7 +2,7 @@
 
 #include "stb_ds.h"
 
-#include "iced_nodedef.h"
+#include "iced.h"
 
 static bool in_node = false;
 
