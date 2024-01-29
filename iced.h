@@ -118,6 +118,8 @@ void iced_gui(void);
 
 void nodedef_init(void);
 
+void parse_file(const char* path, struct node* root);
+
 extern int n_nodedefs;
 extern struct nodedef nodedefs[MAX_NODEDEFS];
 
