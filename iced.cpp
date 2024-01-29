@@ -94,6 +94,12 @@ static struct node* parser_top(struct parser* ps)
 	return n == 0 ? NULL : &ps->nodestack_arr[n-1];
 }
 
+static void parser_error(struct parser* ps, const char* msg)
+{
+	fprintf(stderr, "PARSE ERROR: %s\n", msg);
+	ps->st = PST_ERROR;
+}
+
 static enum parser_expect_type handle_arg1(struct parser* ps, float** dst, int* out_n)
 {
 	assert(ps->st == PST_ARG1);
@@ -125,6 +131,8 @@ static enum parser_expect_type handle_arg1(struct parser* ps, float** dst, int* 
 static enum parser_expect_type parser_next(struct parser* ps)
 {
 	switch (ps->st) {
+	case PST_ERROR:   return PARSER_ERROR;
+
 	case PST0:        return EXPECT_SYMBOL_OR_EOL;
 	case PST_EOSTMT:  return EXPECT_EOL;
 
@@ -196,8 +204,7 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		} else if (strmemeq("flags", s0, s1)) {
 			ps->st = PST_FLAGS;
 		} else {
-			fprintf(stderr, "PARSER ERROR: unhandled string\n");
-			ps->st = PST_ERROR;
+			parser_error(ps, "unhandled string");
 		}
 		break;
 	case PST_NODE: {
@@ -230,8 +237,7 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		}
 
 		if (type == -1) {
-			fprintf(stderr, "PARSER ERROR: unhandled node type\n");
-			ps->st = PST_ERROR;
+			parser_error(ps, "unhandled node type");
 			break;
 		}
 
@@ -268,8 +274,7 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 				}
 			}
 			if (index == -1) {
-				fprintf(stderr, "PARSER ERROR: unhandled node type\n");
-				ps->st = PST_ERROR;
+				parser_error(ps, "unhandled node type\n");
 				break;
 			}
 			assert(index >= 0);
@@ -292,11 +297,9 @@ static void parser_push_eol(struct parser* ps)
 	case PST_EOSTMT:
 		ps->st = PST0;
 		return;
-	case PST_ARG1:
-		// TODO check correct state? this allows early arg termination
-		ps->st = PST0;
-		return;
-	default: assert(!"unhandled state");
+	default:
+		parser_error(ps, "unexpected EOL");
+		break;
 	}
 }
 
@@ -358,7 +361,7 @@ static void parse_file(const char* path)
 			if (is_eol) {
 				parser_push_eol(&ps);
 			} else {
-				fprintf(stderr, "PARSER ERROR: expected EOL\n");
+				parser_error(&ps, "expected EOL");
 				parse_error = true;
 			}
 			break;
@@ -392,7 +395,7 @@ static void parse_file(const char* path)
 			}
 
 			if (p == p0) {
-				fprintf(stderr, "PARSER ERROR: expected token\n");
+				parser_error(&ps, "expected token");
 				parse_error = true;
 				break;
 			}
@@ -412,7 +415,7 @@ static void parse_file(const char* path)
 			case EXPECT_FLOAT: {
 				double f = strtod(tmp, &endptr);
 				if (endptr == tmp) {
-					fprintf(stderr, "PARSER ERROR: expected float\n");
+					parser_error(&ps, "expected float");
 					parse_error = true;
 					break;
 				}
@@ -421,7 +424,7 @@ static void parse_file(const char* path)
 			case EXPECT_INT: {
 				long i = strtol(tmp, &endptr, 10);
 				if (endptr == tmp) {
-					fprintf(stderr, "PARSER ERROR: expected int\n");
+					parser_error(&ps, "expected int");
 					parse_error = true;
 					break;
 				}
