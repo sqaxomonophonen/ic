@@ -119,11 +119,7 @@ static enum parser_expect_type handle_arg1(struct parser* ps, float** dst, int* 
 	assert(n >= 1);
 	if (dst != NULL) *dst = fp;
 	if (out_n != NULL) *out_n = n;
-	if (ps->seq >= n) {
-		return EXPECT_EOL;
-	} else {
-		return EXPECT_FLOAT;
-	}
+	return ps->seq >= n ? EXPECT_EOL : EXPECT_FLOAT;
 }
 
 static enum parser_expect_type parser_next(struct parser* ps)
