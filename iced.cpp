@@ -135,4 +135,6 @@ void iced_gui(void)
 		}
 		ImGui::End();
 	}
+
+	iced_codegen(&root_node); // XXX
 }
