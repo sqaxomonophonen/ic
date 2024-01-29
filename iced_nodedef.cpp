@@ -4,107 +4,109 @@
 
 #include "iced.h"
 
-static bool in_node = false;
-
-static struct nodedef* nodedef_arr;
-static struct nodedef def;
+int n_nodedefs;
+struct nodedef nodedefs[MAX_NODEDEFS];
+static struct nodedef* def = NULL;
 
 static void nodedef(enum nodedef_type type, const char* name)
 {
-	assert(!in_node);
-	in_node = true;
-	memset(&def, 0, sizeof def);
-	def.type = type;
-	def.name = name;
+	assert(def == NULL);
+	assert((type != NILNODE || n_nodedefs == 0) && "NILNODE must be first");
+	assert(n_nodedefs < MAX_NODEDEFS);
+	def = &nodedefs[n_nodedefs++];
+	memset(def, 0, sizeof *def);
+	def->type = type;
+	def->name = name;
 }
 
 static void nodedef_end(void)
 {
-	assert(in_node);
-	assert(def.name != NULL);
-	switch (def.type) {
+	assert(def != NULL);
+	assert(def->name != NULL);
+	switch (def->type) {
+	case NILNODE:
+		break;
 	case SDF3D:
-		assert(def.sdf3d.glsl_sdf3d != NULL);
+		assert(def->sdf3d.glsl_sdf3d != NULL);
 		break;
 	case SDF2D:
-		assert(def.sdf2d.glsl_sdf2d != NULL);
+		assert(def->sdf2d.glsl_sdf2d != NULL);
 		break;
 	case TX3D:
-		assert(def.tx3d.glsl_tx3d != NULL);
+		assert(def->tx3d.glsl_tx3d != NULL);
 		break;
 	case TX2D:
-		assert(def.tx2d.glsl_tx2d != NULL);
+		assert(def->tx2d.glsl_tx2d != NULL);
 		break;
 	case VOLUMIZE:
-		assert(def.volumize.glsl_tx != NULL);
+		assert(def->volumize.glsl_tx != NULL);
 		break;
 	case D1:
-		assert(def.d1.glsl_d1 != NULL);
+		assert(def->d1.glsl_d1 != NULL);
 		break;
 	case D2:
-		assert(def.d2.glsl_d2 != NULL);
+		assert(def->d2.glsl_d2 != NULL);
 		break;
 	default: assert(!"unhandled type");
 	}
-	arrput(nodedef_arr, def);
-	in_node = false;
+	def = NULL;
 }
 
 static void glsl_sdf3d(const char* src)
 {
-	assert(in_node);
-	assert(def.type == SDF3D);
-	assert(def.sdf3d.glsl_sdf3d == NULL);
-	def.sdf3d.glsl_sdf3d = src;
+	assert(def != NULL);
+	assert(def->type == SDF3D);
+	assert(def->sdf3d.glsl_sdf3d == NULL);
+	def->sdf3d.glsl_sdf3d = src;
 }
 
 static void glsl_sdf2d(const char* src)
 {
-	assert(in_node);
-	assert(def.type == SDF2D);
-	assert(def.sdf2d.glsl_sdf2d == NULL);
-	def.sdf2d.glsl_sdf2d = src;
+	assert(def != NULL);
+	assert(def->type == SDF2D);
+	assert(def->sdf2d.glsl_sdf2d == NULL);
+	def->sdf2d.glsl_sdf2d = src;
 }
 
 static void glsl_tx3d(const char* src)
 {
-	assert(in_node);
-	assert(def.type == TX3D);
-	assert(def.tx3d.glsl_tx3d == NULL);
-	def.tx3d.glsl_tx3d = src;
+	assert(def != NULL);
+	assert(def->type == TX3D);
+	assert(def->tx3d.glsl_tx3d == NULL);
+	def->tx3d.glsl_tx3d = src;
 }
 
 static void glsl_tx2d(const char* src)
 {
-	assert(in_node);
-	assert(def.type == TX2D);
-	assert(def.tx2d.glsl_tx2d == NULL);
-	def.tx2d.glsl_tx2d = src;
+	assert(def != NULL);
+	assert(def->type == TX2D);
+	assert(def->tx2d.glsl_tx2d == NULL);
+	def->tx2d.glsl_tx2d = src;
 }
 
 static void glsl_tx(const char* src)
 {
-	assert(in_node);
-	assert(def.type == VOLUMIZE);
-	assert(def.volumize.glsl_tx== NULL);
-	def.volumize.glsl_tx = src;
+	assert(def != NULL);
+	assert(def->type == VOLUMIZE);
+	assert(def->volumize.glsl_tx== NULL);
+	def->volumize.glsl_tx = src;
 }
 
 static void glsl_d1(const char* src)
 {
-	assert(in_node);
-	if (def.type == TX2D) {
-		assert(def.tx2d.glsl_d1 == NULL);
-		def.tx2d.glsl_d1 = src;
-	} else if (def.type == TX3D) {
-		assert(def.tx3d.glsl_d1 == NULL);
-		def.tx3d.glsl_d1 = src;
-	} else if (def.type == VOLUMIZE) {
-		assert(def.volumize.glsl_d1 == NULL);
-		def.volumize.glsl_d1  = src;
-	} else if (def.type == D1) {
-		assert(def.d1.glsl_d1 == NULL);
-		def.d1.glsl_d1  = src;
+	assert(def != NULL);
+	if (def->type == TX2D) {
+		assert(def->tx2d.glsl_d1 == NULL);
+		def->tx2d.glsl_d1 = src;
+	} else if (def->type == TX3D) {
+		assert(def->tx3d.glsl_d1 == NULL);
+		def->tx3d.glsl_d1 = src;
+	} else if (def->type == VOLUMIZE) {
+		assert(def->volumize.glsl_d1 == NULL);
+		def->volumize.glsl_d1  = src;
+	} else if (def->type == D1) {
+		assert(def->d1.glsl_d1 == NULL);
+		def->d1.glsl_d1  = src;
 	} else {
 		assert(!"bad type");
 	}
@@ -112,25 +114,26 @@ static void glsl_d1(const char* src)
 
 static void glsl_d2(const char* src)
 {
-	assert(in_node);
-	assert(def.type == D2);
-	assert(def.d2.glsl_d2 == NULL);
-	def.d2.glsl_d2 = src;
+	assert(def != NULL);
+	assert(def->type == D2);
+	assert(def->d2.glsl_d2 == NULL);
+	def->d2.glsl_d2 = src;
 }
 
 static void glsl_d2m(const char* src)
 {
-	assert(in_node);
-	assert(def.type == D2);
-	assert(def.d2.glsl_d2m == NULL);
-	def.d2.glsl_d2m = src;
+	assert(def != NULL);
+	assert(def->type == D2);
+	assert(def->d2.glsl_d2m == NULL);
+	def->d2.glsl_d2m = src;
 }
 
 static void arg(const char* name, enum nodedef_arg_type type, int argidx)
 {
-	assert(0 <= argidx && argidx < NODEDEF_MAX_ARGS);
-	if (argidx >= def.n_args) def.n_args = argidx + 1;
-	struct nodedef_arg* a = &def.args[argidx];
+	assert(def != NULL);
+	assert(0 <= argidx && argidx < MAX_NODEDEF_ARGS);
+	if (argidx >= def->n_args) def->n_args = argidx + 1;
+	struct nodedef_arg* a = &def->args[argidx];
 	a->name = name;
 	a->type = type;
 }
@@ -157,20 +160,28 @@ static void affine_scale_2d(gbMat4* m, union nodearg* args)
 
 static void fn_affine_3d(void (*fn)(gbMat4* m, union nodearg* args))
 {
-	assert(def.type == TX3D);
-	assert(def.tx3d.fn_affine == NULL);
-	def.tx3d.fn_affine = fn;
+	assert(def != NULL);
+	assert(def->type == TX3D);
+	assert(def->tx3d.fn_affine == NULL);
+	def->tx3d.fn_affine = fn;
 }
 
 static void fn_affine_2d(void (*fn)(gbMat4* m, union nodearg* args))
 {
-	assert(def.type == TX2D);
-	assert(def.tx2d.fn_affine == NULL);
-	def.tx2d.fn_affine = fn;
+	assert(def != NULL);
+	assert(def->type == TX2D);
+	assert(def->tx2d.fn_affine == NULL);
+	def->tx2d.fn_affine = fn;
 }
 
 void nodedef_init(void)
 {
+	// NILNODE must be first
+	nodedef(NILNODE, "<NILNODE>");
+	nodedef_end();
+
+	/////////////////////////
+
 	nodedef(SDF3D, "sphere_3d");
 	arg("radius", RADIUS, 0);
 	glsl_sdf3d(

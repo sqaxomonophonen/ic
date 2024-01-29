@@ -2,7 +2,8 @@
 
 #include "gb_math.h"
 
-#define NODEDEF_MAX_ARGS (4)
+#define MAX_NODEDEF_ARGS (4)
+#define MAX_NODEDEFS (1<<12)
 
 union nodearg {
 	float f1;
@@ -27,7 +28,9 @@ struct nodedef_arg {
 };
 
 enum nodedef_type {
-	SDF3D = 100,
+	NILNODE = 0,
+
+	SDF3D = 100000,
 	SDF2D,
 	TX3D,
 	TX2D,
@@ -35,7 +38,8 @@ enum nodedef_type {
 	D1,
 	D2,
 
-	SPECIAL_NODEDEFS = 1000,
+	SPECIAL_NODEDEFS = 110000,
+	//SCENE, //
 	PROCEDURE, // subtree from lua code
 	VIEW3D, // editor 3d view of subtree
 	VIEW2D, // editor 2d view of subtree
@@ -87,7 +91,7 @@ struct nodedef {
 	enum nodedef_type type;
 	const char* name;
 	int n_args;
-	struct nodedef_arg args[NODEDEF_MAX_ARGS];
+	struct nodedef_arg args[MAX_NODEDEF_ARGS];
 	union {
 		struct nodedef_sdf3d sdf3d;
 		struct nodedef_sdf2d sdf2d;
@@ -99,10 +103,23 @@ struct nodedef {
 	};
 };
 
+struct node {
+	int type; // nodedef index, or SPECIAL_NODEDEFS+
+	union nodearg* arg_arr;
+	char* name;
+	// TODO flag mask?
+	bool inline_child; // show child node as inline (only valid if arrlen(child_arr)==1)
+	//bool invalid_context; // XXX derived? do I have to cache it?
+	struct node* child_arr;
+};
+
 void iced_init(void);
 void iced_gui(void);
 
 void nodedef_init(void);
+
+extern int n_nodedefs;
+extern struct nodedef nodedefs[MAX_NODEDEFS];
 
 #define ICED_H
 #endif
