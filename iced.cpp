@@ -189,7 +189,18 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		} else if (strmemeq("material", s0, s1)) {
 			ps->st = PST_MATERIAL;
 		} else if (strmemeq("endnode", s0, s1)) {
-			// TODO commit node?
+			if (arrlen(ps->nodestack_arr) == 0) {
+				parser_error(ps, "endnode without node");
+			} else {
+				struct node nn = arrpop(ps->nodestack_arr);
+				struct node* dn;
+				if (arrlen(ps->nodestack_arr) == 0) {
+					dn = &root_node;
+				} else {
+					dn = parser_top(ps);
+				}
+				arrput(dn->child_arr, nn);
+			}
 			ps->st = PST_EOSTMT;
 		} else if (strmemeq("endscene", s0, s1)) {
 			// TODO commit scene?
