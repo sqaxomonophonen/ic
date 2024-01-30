@@ -27,18 +27,28 @@ struct nodedef_arg {
 	enum nodedef_arg_type type;
 };
 
+#define EMIT_NODEDEF_TYPES \
+	X(SDF3D) \
+	X(SDF2D) \
+	X(TX3D) \
+	X(TX2D) \
+	X(VOLUMIZE) \
+	X(D1) \
+	X(D2)
+
 enum nodedef_type {
+	NILNODEDEF = 0,
+	#define X(NAME) NAME,
+	EMIT_NODEDEF_TYPES
+	#undef X
+};
+
+enum node_type {
 	NILNODE = 0,
 
-	SDF3D = 100000,
-	SDF2D,
-	TX3D,
-	TX2D,
-	VOLUMIZE,
-	D1,
-	D2,
+	// gap reserved for `nodedefs` indices
 
-	SPECIAL_NODEDEFS = 110000,
+	SPECIAL_NODE_TYPES = 100000,
 	//SCENE, //
 	PROCEDURE, // subtree from lua code
 	VIEW3D, // editor 3d view of subtree
@@ -50,7 +60,6 @@ enum nodedef_type {
 	OPTIMIZE, // bounding volume optimization
 	NAVMESH_GEN, // navigation mesh generator
 	ENTITY, // entity
-
 };
 
 struct nodedef_sdf3d {
@@ -104,7 +113,7 @@ struct nodedef {
 };
 
 struct node {
-	int type; // nodedef index, or SPECIAL_NODEDEFS+
+	enum node_type type;
 	union nodearg* arg_arr;
 	char* name;
 	// TODO flag mask?
@@ -117,6 +126,7 @@ void iced_init(void);
 void iced_gui(void);
 
 void nodedef_init(void);
+int nodedef_find(enum nodedef_type type, const char* name);
 
 void parse_file(const char* path, struct node* root);
 void iced_codegen(struct node* root);

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 
 #include "stb_ds.h"
 
@@ -11,7 +12,7 @@ static struct nodedef* def = NULL;
 static void nodedef(enum nodedef_type type, const char* name)
 {
 	assert(def == NULL);
-	assert((type != NILNODE || n_nodedefs == 0) && "NILNODE must be first");
+	assert((type != NILNODEDEF || n_nodedefs == 0) && "NILNODE must be first");
 	assert(n_nodedefs < MAX_NODEDEFS);
 	def = &nodedefs[n_nodedefs++];
 	memset(def, 0, sizeof *def);
@@ -174,15 +175,15 @@ static void fn_affine_2d(void (*fn)(gbMat4* m, union nodearg* args))
 	def->tx2d.fn_affine = fn;
 }
 
-void nodedef_init(void)
+static void emit_nodedef(void)
 {
 	// NILNODE must be first
-	nodedef(NILNODE, "<NILNODE>");
+	nodedef(NILNODEDEF, "<NILNODE>");
 	nodedef_end();
 
 	/////////////////////////
 
-	nodedef(SDF3D, "sphere_3d");
+	nodedef(SDF3D, "sphere");
 	arg("radius", RADIUS, 0);
 	glsl_sdf3d(
 	"float FN(vec3 p, float r)\n"
@@ -194,7 +195,7 @@ void nodedef_init(void)
 
 	/////////////////////////
 
-	nodedef(SDF3D, "box_3d");
+	nodedef(SDF3D, "box");
 	arg("dimensions", DIM3D, 0);
 	glsl_sdf3d(
 	"float FN(vec3 p, vec3 b)\n"
@@ -207,7 +208,7 @@ void nodedef_init(void)
 
 	/////////////////////////
 
-	nodedef(SDF2D, "circle_2d");
+	nodedef(SDF2D, "circle");
 	arg("radius", RADIUS, 0);
 	glsl_sdf2d(
 	"float FN(vec2 p, float r)\n"
@@ -219,7 +220,7 @@ void nodedef_init(void)
 
 	/////////////////////////
 
-	nodedef(TX3D, "translate_3d");
+	nodedef(TX3D, "translate");
 	arg("translation", POS3D, 0);
 	glsl_tx3d(
 	"vec3 FN(vec3 p, vec3 r)\n"
@@ -232,7 +233,7 @@ void nodedef_init(void)
 
 	/////////////////////////
 
-	nodedef(TX2D, "translate_2d");
+	nodedef(TX2D, "translate");
 	arg("translation", POS2D, 0);
 	glsl_tx2d(
 	"vec2 FN(vec2 p, vec2 r)\n"
@@ -245,7 +246,7 @@ void nodedef_init(void)
 
 	/////////////////////////
 
-	nodedef(TX3D, "scale_3d");
+	nodedef(TX3D, "scale");
 	arg("scaling", SCALAR, 0);
 	glsl_tx3d(
 	"vec3 FN(vec3 p, float s)\n"
@@ -264,7 +265,7 @@ void nodedef_init(void)
 
 	/////////////////////////
 
-	nodedef(TX2D, "scale_2d");
+	nodedef(TX2D, "scale");
 	arg("scaling", SCALAR, 0);
 	glsl_tx2d(
 	"vec2 FN(vec2 p, float s)\n"
@@ -477,4 +478,41 @@ void nodedef_init(void)
 	//limit_repeat
 	//twist
 	//bend
+}
+
+static int nodedef_compar(const void* va, const void* vb)
+{
+	const struct nodedef* a = (const struct nodedef*)va;
+	const struct nodedef* b = (const struct nodedef*)vb;
+	const int d0 = (int)a->type - (int)b->type;
+	if (d0 != 0) return d0;
+	return strcmp(a->name, b->name);
+}
+
+void nodedef_init(void)
+{
+	emit_nodedef();
+	qsort(nodedefs, n_nodedefs, sizeof nodedefs[0], nodedef_compar);
+}
+
+int nodedef_find(enum nodedef_type type, const char* name)
+{
+	const struct nodedef mock = {
+		.type = type,
+		.name = name,
+	};
+	int left = 0;
+	int right = n_nodedefs - 1;
+	while (left <= right) {
+		const int mid = (left + right) >> 1;
+		const int d = nodedef_compar(&nodedefs[mid], &mock);
+		if (d < 0) {
+			left = mid + 1;
+		} else if (d > 0) {
+			right = mid - 1;
+		} else {
+			return mid;
+		}
+	}
+	return -1;
 }

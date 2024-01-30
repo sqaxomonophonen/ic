@@ -12,42 +12,39 @@ static bool show_window_node = true;
 
 struct node root_node;
 
-static enum nodedef_type get_nodedef_type_from_node_type(int type)
+static bool node_is_leaf(struct node* node)
 {
-	if ((enum nodedef_type)type > SPECIAL_NODEDEFS) return (enum nodedef_type)type;
-	assert(0 <= type && type < n_nodedefs);
-	return nodedefs[type].type;
-}
-
-static bool nodedef_type_is_leaf(enum nodedef_type t)
-{
-	switch (t) {
+	switch (node->type) {
 	case NILNODE:
-	case SDF3D:
-	case SDF2D:
+		return true;
+	case PROCEDURE:
+	case MATERIAL:
 	case WORK_LIGHT:
+	case NAVMESH_GEN:
 	case ENTITY:
 		return true;
-
-	case TX3D:
-	case TX2D:
-	case VOLUMIZE:
-	case D1:
-	case D2:
 	case VIEW3D:
 	case VIEW2D:
 	case RAYMARCH_VIEW:
 	case PATHMARCH_RENDER:
-	case MATERIAL:
 	case OPTIMIZE:
-	case PROCEDURE:
-	//case SCENE: // I think?
-	case NAVMESH_GEN: // I think?
 		return false;
-
-	default:
-		assert(!"unhandled type");
 	}
+	int t = (int)node->type;
+	if (0 <= t && t < n_nodedefs) {
+		switch (nodedefs[t].type) {
+		case SDF3D:
+		case SDF2D:
+			return true;
+		case TX3D:
+		case TX2D:
+		case VOLUMIZE:
+		case D1:
+		case D2:
+			return false;
+		}
+	}
+	assert(!"unreachable");
 }
 
 void iced_init(void)
@@ -80,7 +77,7 @@ static void ui_node(struct node* node)
 	}
 
 	const int n_childs = arrlen(node->child_arr);
-	const bool is_leaf = nodedef_type_is_leaf(get_nodedef_type_from_node_type(node->type));
+	const bool is_leaf = node_is_leaf(node);
 	bool recurse = false;
 	if (is_leaf && n_childs == 0) {
 		ImGui::TreeNodeEx("Leaf", base_flags | leaf_flags, "%s", name);
@@ -136,5 +133,5 @@ void iced_gui(void)
 		ImGui::End();
 	}
 
-	iced_codegen(&root_node); // XXX
+	//iced_codegen(&root_node); // XXX
 }

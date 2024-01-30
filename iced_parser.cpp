@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 #include "stb_ds.h"
 #include "util.h"
 #include "iced.h"
@@ -18,8 +19,6 @@ enum parser_expect_type {
 enum parser_state {
 	PST0 = 0,
 	PST_NODE,
-	PST_SCENE,
-	PST_MATERIAL,
 	PST_ARG0,
 	PST_ARG1,
 	PST_NAME,
@@ -29,6 +28,7 @@ enum parser_state {
 };
 
 struct parser {
+	int line;
 	enum parser_state st;
 	int depth;
 	struct node* nodestack_arr;
@@ -43,6 +43,7 @@ static void parser_init(struct parser* ps, struct node* root)
 	memset(ps, 0, sizeof *ps);
 	ps->st = PST0;
 	ps->root = root;
+	ps->line = 1;
 }
 
 static struct node* parser_top(struct parser* ps)
@@ -51,9 +52,15 @@ static struct node* parser_top(struct parser* ps)
 	return n == 0 ? NULL : &ps->nodestack_arr[n-1];
 }
 
-static void parser_error(struct parser* ps, const char* msg)
+__attribute__((format (printf, 2, 3)))
+static void parser_error(struct parser* ps, const char* fmt, ...)
 {
-	fprintf(stderr, "PARSE ERROR: %s\n", msg);
+	va_list args;
+	va_start(args, fmt);
+	fprintf(stderr, "PARSER ERROR at line %d: ", ps->line);
+	vfprintf(stderr, fmt, args);
+	fprintf(stderr, "\n");
+	va_end(args);
 	ps->st = PST_ERROR;
 }
 
@@ -94,8 +101,6 @@ static enum parser_expect_type parser_next(struct parser* ps)
 	case PST_EOSTMT:  return EXPECT_EOL;
 
 	case PST_NODE:
-	case PST_SCENE:
-	case PST_MATERIAL:
 	case PST_ARG0:
 		return EXPECT_SYMBOL;
 
@@ -135,16 +140,25 @@ static bool strmemeq(const char* c_str, const char* s0, const char* s1)
 	return memcmp(c_str, s0, n) == 0;
 }
 
+static void mkcstr(char* dst, size_t dstcap, const char* s0, const char* s1)
+{
+	const size_t n = s1-s0;
+	assert((dstcap >= n+1) && "string too big");
+	memcpy(dst, s0, n);
+	dst[n] = 0;
+}
+
+#define STACK_CSTR(NAME,S0,S1) \
+	char NAME[1<<12]; \
+	mkcstr(NAME, sizeof NAME, S0, S1);
+
+
 static void parser_push_string(struct parser* ps, const char* s0, const char* s1)
 {
 	switch (ps->st) {
 	case PST0:
 		if (strmemeq("node", s0, s1)) {
 			ps->st = PST_NODE;
-		} else if (strmemeq("scene", s0, s1)) {
-			ps->st = PST_SCENE;
-		} else if (strmemeq("material", s0, s1)) {
-			ps->st = PST_MATERIAL;
 		} else if (strmemeq("endnode", s0, s1)) {
 			if (arrlen(ps->nodestack_arr) == 0) {
 				parser_error(ps, "endnode without node");
@@ -159,12 +173,6 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 				arrput(dn->child_arr, nn);
 			}
 			ps->st = PST_EOSTMT;
-		} else if (strmemeq("endscene", s0, s1)) {
-			// TODO commit scene?
-			ps->st = PST_EOSTMT;
-		} else if (strmemeq("endmaterial", s0, s1)) {
-			// TODO commit material?
-			ps->st = PST_EOSTMT;
 		} else if (strmemeq("arg", s0, s1)) {
 			ps->st = PST_ARG0;
 		} else if (strmemeq("name", s0, s1)) {
@@ -172,17 +180,41 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		} else if (strmemeq("flags", s0, s1)) {
 			ps->st = PST_FLAGS;
 		} else {
-			parser_error(ps, "unhandled string");
+			STACK_CSTR(str, s0, s1);
+			parser_error(ps, "unhandled string [%s]", str);
 		}
 		break;
 	case PST_NODE: {
-		int type = -1;
+		enum node_type type = (enum node_type)-1;
 
 		if (type == -1) {
-			for (int i = 0; i < n_nodedefs; i++) {
-				if (strmemeq(nodedefs[i].name, s0, s1)) {
-					type = i;
+			const char* sc = NULL;
+			for (const char* s = s0; s < s1; s++) {
+				if (*s == ':') {
+					sc = s;
 					break;
+				}
+			}
+			if (sc != NULL && s0 < sc && sc < (s1-1)) {
+				enum nodedef_type dtype = (enum nodedef_type)-1;
+				#define X(NAME) \
+				if (dtype == -1 && strmemeq(#NAME, s0, sc)) { \
+					dtype = NAME; \
+				}
+				EMIT_NODEDEF_TYPES
+				#undef X
+				if (dtype == -1) {
+					STACK_CSTR(str, s0, s1);
+					parser_error(ps, "unhandled node type [%s] (1)", str);
+				} else {
+					STACK_CSTR(name, sc+1, s1);
+					int idx = nodedef_find(dtype, name);
+					if (idx == -1) {
+						STACK_CSTR(str, s0, s1);
+						parser_error(ps, "unhandled node type [%s] (2)", str);
+					} else {
+						type = (enum node_type)idx;
+					}
 				}
 			}
 		}
@@ -205,9 +237,12 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		}
 
 		if (type == -1) {
-			parser_error(ps, "unhandled node type");
+			STACK_CSTR(str, s0, s1);
+			parser_error(ps, "unhandled node type [%s] (3)", str);
 			break;
 		}
+
+		assert(type > 0);
 
 		struct node* node = arraddnptr(ps->nodestack_arr, 1);
 		assert(node == parser_top(ps));
@@ -242,7 +277,8 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 				}
 			}
 			if (index == -1) {
-				parser_error(ps, "unhandled node type\n");
+				STACK_CSTR(str, s0, s1);
+				parser_error(ps, "unhandled arg type [%s] (3)", str);
 				break;
 			}
 			assert(index >= 0);
@@ -266,7 +302,7 @@ static void parser_push_eol(struct parser* ps)
 		ps->st = PST0;
 		return;
 	default:
-		parser_error(ps, "unexpected EOL");
+		parser_error(ps, "unexpected EOL (st=%d)", ps->st);
 		break;
 	}
 }
@@ -314,8 +350,9 @@ void parse_file(const char* path, struct node* root)
 			}
 		}
 
-		while (*p == '\n' || *p == '\r') {
+		while (*p == '\n') {
 			p++;
+			ps.line++;
 			is_eol = true;
 		}
 		if (*p == 0) {
