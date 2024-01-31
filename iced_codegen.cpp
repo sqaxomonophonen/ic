@@ -12,8 +12,9 @@ static char* P1 = NULL;
 static void addraw(const char* src, size_t n)
 {
 	if (src == NULL) return;
-	assert((P+n)<P1);
+	assert((P+n+1)<P1);
 	memcpy(P, src, n);
+	P[n] = 0;
 	P += n;
 }
 
@@ -24,14 +25,14 @@ static void addsrc(const char* src)
 
 static void trace(struct node* node)
 {
-	if (nodedef_tag_arr[node->type]) return;
-	nodedef_tag_arr[node->type] = 1;
-
 	if (0 < node->type && node->type < n_nodedefs) {
-		struct nodedef* def = &nodedefs[node->type];
-		for (int i = 0; i < def->n_glsl_fns; i++) {
-			struct glsl_fn* fn = &def->glsl_fns[i];
-			addsrc(fn->src);
+		if (!nodedef_tag_arr[node->type]) {
+			nodedef_tag_arr[node->type] = 1;
+			struct nodedef* def = &nodedefs[node->type];
+			for (int i = 0; i < def->n_glsl_fns; i++) {
+				struct glsl_fn* fn = &def->glsl_fns[i];
+				addsrc(fn->src);
+			}
 		}
 	}
 
