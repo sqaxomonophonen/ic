@@ -118,10 +118,7 @@ void iced_gui(void)
 {
 	if (show_window_tree) {
 		if (ImGui::Begin("Tree", &show_window_tree)) {
-			ImGui::Button("Insert subtree");
-			ImGui::SameLine();
-			ImGui::Button("+node");
-
+			if (ImGui::Button("CODEGEN")) iced_codegen(&root_node); // XXX
 			ui_tree();
 		}
 		ImGui::End();
@@ -132,6 +129,4 @@ void iced_gui(void)
 		}
 		ImGui::End();
 	}
-
-	//iced_codegen(&root_node); // XXX
 }

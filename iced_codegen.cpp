@@ -9,50 +9,70 @@ static char* P0 = NULL;
 static char* P = NULL;
 static char* P1 = NULL;
 
-static void addsrc(const char* n0, const char* n1, const char* src)
+static void addsrc(const char* src)
 {
 	if (src == NULL) return;
-	P += snprintf(P, P1-P, "#define FN %s%s%s\n", n0, n1==NULL?"":"_", n1==NULL?"":n1);
 	const size_t n = strlen(src);
 	assert((P+n)<P1);
 	memcpy(P, src, n);
 	P += n;
+}
+
+static void addfn(const char* name, const char* postfix, const char* src)
+{
+	if (src == NULL) return;
+	P += snprintf(P, P1-P, "#define FN %s%s%s\n", name, postfix==NULL?"":"_", postfix==NULL?"":postfix);
+	addsrc(src);
 	assert(P<P1);
 	P += snprintf(P, P1-P, "#undef FN\n");
 	assert(P<P1);
 }
 
+static const char* get_nodedef_type_str(enum nodedef_type t)
+{
+	switch (t) {
+	#define X(NAME) case NAME: return #NAME;
+	EMIT_NODEDEF_TYPES
+	#undef X
+	}
+	assert(!"unhandled type");
+}
+
 static void trace(struct node* node)
 {
-	if (0 < node->type && node->type < n_nodedefs && nodedef_tag_arr[node->type] == 0) {
-		nodedef_tag_arr[node->type] = 1;
+	if (nodedef_tag_arr[node->type]) return;
+	nodedef_tag_arr[node->type] = 1;
+
+	if (0 < node->type && node->type < n_nodedefs) {
 		struct nodedef* def = &nodedefs[node->type];
-		const char* n = def->name;
+		char name[1<<12];
+		snprintf(name, sizeof name, "%s_%s", get_nodedef_type_str(def->type), def->name);
+
 		switch (def->type) {
 		case SDF3D:
-			addsrc(n, NULL, def->sdf3d.glsl_sdf3d);
+			addfn(name, NULL, def->sdf3d.glsl_sdf3d);
 			break;
 		case SDF2D:
-			addsrc(n, NULL, def->sdf2d.glsl_sdf2d);
+			addfn(name, NULL, def->sdf2d.glsl_sdf2d);
 			break;
 		case TX3D:
-			addsrc(n, "tx", def->tx3d.glsl_tx3d);
-			addsrc(n, "d1", def->tx3d.glsl_d1);
+			addfn(name, "tx", def->tx3d.glsl_tx3d);
+			addfn(name, "d1", def->tx3d.glsl_d1);
 			break;
 		case TX2D:
-			addsrc(n, "tx", def->tx2d.glsl_tx2d);
-			addsrc(n, "d1", def->tx2d.glsl_d1);
+			addfn(name, "tx", def->tx2d.glsl_tx2d);
+			addfn(name, "d1", def->tx2d.glsl_d1);
 			break;
 		case D1:
-			addsrc(n, NULL, def->d1.glsl_d1);
+			addfn(name, NULL, def->d1.glsl_d1);
 			break;
 		case D2:
-			addsrc(n, "d2", def->d2.glsl_d2);
-			//addsrc(n, "d2m", def->d2.glsl_d2m);
+			addfn(name, "d2", def->d2.glsl_d2);
+			//addfn(name, "d2m", def->d2.glsl_d2m);
 			break;
 		case VOLUMIZE:
-			addsrc(n, "tx", def->volumize.glsl_tx);
-			addsrc(n, "d1", def->volumize.glsl_d1);
+			addfn(name, "tx", def->volumize.glsl_tx);
+			addfn(name, "d1", def->volumize.glsl_d1);
 			break;
 		default:
 			assert(!"unhandled type");
@@ -65,6 +85,42 @@ static void trace(struct node* node)
 	}
 }
 
+static void genmap_rec(struct node* node)
+{
+	if (0 < node->type && node->type < n_nodedefs) {
+		struct nodedef* def = &nodedefs[node->type];
+		switch (def->type) {
+		case SDF3D:
+			break;
+		case SDF2D:
+			break;
+		case TX3D:
+			break;
+		case TX2D:
+			break;
+		case D1:
+			break;
+		case D2:
+			break;
+		case VOLUMIZE:
+			break;
+		default:
+			assert(!"unhandled type");
+		}
+	}
+}
+
+static void genmap(struct node* node)
+{
+	addsrc(
+	"float map(vec3 p)\n"
+	"{\n"
+	);
+	genmap_rec(node);
+	addsrc(
+	"}\n"
+	);
+}
 
 void iced_codegen(struct node* root)
 {
@@ -75,11 +131,12 @@ void iced_codegen(struct node* root)
 	}
 	P = P0;
 
-	const int n = n_nodedefs;
-	arrsetlen(nodedef_tag_arr, n);
-	memset(nodedef_tag_arr, 0, n*sizeof(nodedef_tag_arr[0]));
+	arrsetlen(nodedef_tag_arr, n_nodedefs);
+	memset(nodedef_tag_arr, 0, n_nodedefs*sizeof(nodedef_tag_arr[0]));
 
 	trace(root);
+
+	genmap(root);
 
 	printf("CODEGEN ::\n%s\n", P0);
 }

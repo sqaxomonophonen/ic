@@ -492,6 +492,7 @@ static int nodedef_compar(const void* va, const void* vb)
 void nodedef_init(void)
 {
 	emit_nodedef();
+	// enable binary search (via nodedef_find()):
 	qsort(nodedefs, n_nodedefs, sizeof nodedefs[0], nodedef_compar);
 }
 
