@@ -186,7 +186,7 @@ static void emit_nodedef(void)
 	nodedef(SDF3D, "sphere");
 	arg("radius", RADIUS, 0);
 	glsl_sdf3d(
-	"float FN(vec3 p, float r)\n"
+	"float $(vec3 p, float r)\n"
 	"{\n"
 	"	return length(p)-r;\n"
 	"}\n"
@@ -198,7 +198,7 @@ static void emit_nodedef(void)
 	nodedef(SDF3D, "box");
 	arg("dimensions", DIM3D, 0);
 	glsl_sdf3d(
-	"float FN(vec3 p, vec3 b)\n"
+	"float $(vec3 p, vec3 b)\n"
 	"{\n"
 	"	vec3 q = abs(p) - b;\n"
 	"	return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);\n"
@@ -211,7 +211,7 @@ static void emit_nodedef(void)
 	nodedef(SDF2D, "circle");
 	arg("radius", RADIUS, 0);
 	glsl_sdf2d(
-	"float FN(vec2 p, float r)\n"
+	"float $(vec2 p, float r)\n"
 	"{\n"
 	"	return length(p)-r;\n"
 	"}\n"
@@ -223,7 +223,7 @@ static void emit_nodedef(void)
 	nodedef(TX3D, "translate");
 	arg("translation", POS3D, 0);
 	glsl_tx3d(
-	"vec3 FN(vec3 p, vec3 r)\n"
+	"vec3 $(vec3 p, vec3 r)\n"
 	"{\n"
 	"	return p + r;\n"
 	"}\n"
@@ -236,7 +236,7 @@ static void emit_nodedef(void)
 	nodedef(TX2D, "translate");
 	arg("translation", POS2D, 0);
 	glsl_tx2d(
-	"vec2 FN(vec2 p, vec2 r)\n"
+	"vec2 $(vec2 p, vec2 r)\n"
 	"{\n"
 	"	return p + r;\n"
 	"}\n"
@@ -249,13 +249,13 @@ static void emit_nodedef(void)
 	nodedef(TX3D, "scale");
 	arg("scaling", SCALAR, 0);
 	glsl_tx3d(
-	"vec3 FN(vec3 p, float s)\n"
+	"vec3 $(vec3 p, float s)\n"
 	"{\n"
 	"	return p / s;\n"
 	"}\n"
 	);
 	glsl_d1(
-	"float FN(vec3 _p, float d, float s)\n"
+	"float $(vec3 _p, float d, float s)\n"
 	"{\n"
 	"	return d * s;\n"
 	"}\n"
@@ -268,13 +268,13 @@ static void emit_nodedef(void)
 	nodedef(TX2D, "scale");
 	arg("scaling", SCALAR, 0);
 	glsl_tx2d(
-	"vec2 FN(vec2 p, float s)\n"
+	"vec2 $(vec2 p, float s)\n"
 	"{\n"
 	"	return p / s;\n"
 	"}\n"
 	);
 	glsl_d1(
-	"float FN(vec3 _p, float d, float s)\n"
+	"float $(vec3 _p, float d, float s)\n"
 	"{\n"
 	"	return d * s;\n"
 	"}\n"
@@ -287,7 +287,7 @@ static void emit_nodedef(void)
 	nodedef(D1, "round");
 	arg("size", SCALAR, 0);
 	glsl_d1(
-	"float FN(float d, float r)\n"
+	"float $(float d, float r)\n"
 	"{\n"
 	"	return d - r;\n"
 	"}\n"
@@ -299,7 +299,7 @@ static void emit_nodedef(void)
 	nodedef(D1, "onion");
 	arg("thickness", SCALAR, 0);
 	glsl_d1(
-	"float FN(float d, float r)\n"
+	"float $(float d, float r)\n"
 	"{\n"
 	"	return abs(d) - r;\n"
 	"}\n"
@@ -310,13 +310,13 @@ static void emit_nodedef(void)
 
 	nodedef(D2, "union");
 	glsl_d2(
-	"float FN(float d0, float d1)\n"
+	"float $(float d0, float d1)\n"
 	"{\n"
 	"	return min(d0, d1);\n"
 	"}\n"
 	);
 	glsl_d2m(
-	"MAT FN(float d0, float d1, MAT m0, MAT m1)\n"
+	"MAT $(float d0, float d1, MAT m0, MAT m1)\n"
 	"{\n"
 	"	return d0 < d1 ? m0 : m1;\n"
 	"}\n"
@@ -328,7 +328,7 @@ static void emit_nodedef(void)
 	nodedef(D2, "smooth_union");
 	arg("size", SCALAR, 0);
 	glsl_d2(
-	"float FN(float d0, float d1, float k)\n"
+	"float $(float d0, float d1, float k)\n"
 	"{\n"
 	"	float h = clamp(0.5 + 0.5*(d1-d0)/k, 0.0, 1.0);\n"
 	"	return mix(d1, d0, h) - k*h*(1.0-h);\n"
@@ -340,7 +340,7 @@ static void emit_nodedef(void)
 
 	nodedef(D2, "displace");
 	glsl_d2(
-	"float FN(float d0, float d1)\n"
+	"float $(float d0, float d1)\n"
 	"{\n"
 	"	return d0 + d1;\n"
 	"}\n"
@@ -352,13 +352,13 @@ static void emit_nodedef(void)
 	nodedef(VOLUMIZE, "extrude");
 	arg("depth", SCALAR, 0);
 	glsl_tx(
-	"vec2 FN(vec3 p, float h)\n"
+	"vec2 $(vec3 p, float h)\n"
 	"{\n"
 	"	return p.xy;\n"
 	"}\n"
 	);
 	glsl_d1(
-	"float FN(vec3 p, float d, float h)\n"
+	"float $(vec3 p, float d, float h)\n"
 	"{\n"
 	"	vec2 w = vec2(d, abs(p.z) - h);\n"
 	"	return min(max(w.x,w.y),0.0) + length(max(w,0.0));\n"
@@ -371,7 +371,7 @@ static void emit_nodedef(void)
 	nodedef(VOLUMIZE, "revolve");
 	arg("offset", SCALAR, 0);
 	glsl_tx(
-	"vec2 FN(vec3 p, float o)\n"
+	"vec2 $(vec3 p, float o)\n"
 	"{\n"
 	"	return vec2(length(p.xz) - o, p.y);\n"
 	"}\n"
@@ -383,13 +383,13 @@ static void emit_nodedef(void)
 	nodedef(TX3D, "elongate");
 	arg("extent", DIM3D, 0);
 	glsl_tx3d(
-	"vec3 FN(vec3 p, vec3 dim)\n"
+	"vec3 $(vec3 p, vec3 dim)\n"
 	"{\n"
 	"	return max(abs(p) - dim, 0.0);\n"
 	"}\n"
 	);
 	glsl_d1(
-	"vec3 FN(vec3 p, float d, vec3 dim)\n"
+	"vec3 $(vec3 p, float d, vec3 dim)\n"
 	"{\n"
 	"	vec3 q = abs(p) - dim;\n"
 	"	return min(max(q.x,max(q.y,q.z)),0.0) + d;\n"

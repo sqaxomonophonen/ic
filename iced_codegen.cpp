@@ -9,23 +9,38 @@ static char* P0 = NULL;
 static char* P = NULL;
 static char* P1 = NULL;
 
-static void addsrc(const char* src)
+static void addraw(const char* src, size_t n)
 {
 	if (src == NULL) return;
-	const size_t n = strlen(src);
 	assert((P+n)<P1);
 	memcpy(P, src, n);
 	P += n;
 }
 
-static void addfn(const char* name, const char* postfix, const char* src)
+static void addsrc(const char* src)
+{
+	addraw(src, strlen(src));
+}
+
+static void addfn(const char* name, const char* src)
 {
 	if (src == NULL) return;
-	P += snprintf(P, P1-P, "#define FN %s%s%s\n", name, postfix==NULL?"":"_", postfix==NULL?"":postfix);
-	addsrc(src);
-	assert(P<P1);
-	P += snprintf(P, P1-P, "#undef FN\n");
-	assert(P<P1);
+	const size_t n = strlen(src);
+	const char* p = src;
+	int pivot = -1;
+	for (size_t i = 0; i < n; i++) {
+		char ch = *(p++);
+		if (ch == '$') {
+			pivot = i;
+			break;
+		}
+	}
+	assert(pivot != -1);
+	p = src;
+	addraw(p, pivot);
+	addraw(name, strlen(name));
+	p += pivot+1;
+	addraw(p, strlen(p));
 }
 
 static const char* get_nodedef_type_str(enum nodedef_type t)
@@ -37,6 +52,23 @@ static const char* get_nodedef_type_str(enum nodedef_type t)
 	}
 	assert(!"unhandled type");
 }
+
+
+#if 0
+enum {
+	FN_SDF3D,
+	FN_SDF2D,
+	FN_TX3D_TX,
+	FN_TX3D_D1,
+	FN_TX2D_TX,
+	FN_TX2D_D1,
+	FN_D1,
+	FN_D2_D2,
+	FN_D2_D2M,
+	FN_VOLUMIZE_TX,
+	FN_VOLUMIZE_D1,
+};
+#endif
 
 static void trace(struct node* node)
 {
@@ -50,29 +82,29 @@ static void trace(struct node* node)
 
 		switch (def->type) {
 		case SDF3D:
-			addfn(name, NULL, def->sdf3d.glsl_sdf3d);
+			addfn(name, /*NULL,*/ def->sdf3d.glsl_sdf3d);
 			break;
 		case SDF2D:
-			addfn(name, NULL, def->sdf2d.glsl_sdf2d);
+			addfn(name, /*NULL,*/ def->sdf2d.glsl_sdf2d);
 			break;
 		case TX3D:
-			addfn(name, "tx", def->tx3d.glsl_tx3d);
-			addfn(name, "d1", def->tx3d.glsl_d1);
+			addfn(name, /*"tx",*/ def->tx3d.glsl_tx3d);
+			addfn(name, /*"d1",*/ def->tx3d.glsl_d1);
 			break;
 		case TX2D:
-			addfn(name, "tx", def->tx2d.glsl_tx2d);
-			addfn(name, "d1", def->tx2d.glsl_d1);
+			addfn(name, /*"tx",*/ def->tx2d.glsl_tx2d);
+			addfn(name, /*"d1",*/ def->tx2d.glsl_d1);
 			break;
 		case D1:
-			addfn(name, NULL, def->d1.glsl_d1);
+			addfn(name, /*NULL,*/ def->d1.glsl_d1);
 			break;
 		case D2:
-			addfn(name, "d2", def->d2.glsl_d2);
-			//addfn(name, "d2m", def->d2.glsl_d2m);
+			addfn(name, /*"d2",*/ def->d2.glsl_d2);
+			//addfn(name, /*"d2m",*/ def->d2.glsl_d2m);
 			break;
 		case VOLUMIZE:
-			addfn(name, "tx", def->volumize.glsl_tx);
-			addfn(name, "d1", def->volumize.glsl_d1);
+			addfn(name, /*"tx",*/ def->volumize.glsl_tx);
+			addfn(name, /*"d1",*/ def->volumize.glsl_d1);
 			break;
 		default:
 			assert(!"unhandled type");
