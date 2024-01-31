@@ -8,6 +8,7 @@
 
 int n_nodedefs;
 struct nodedef nodedefs[MAX_NODEDEFS];
+int union_nodedef_index;
 static struct nodedef* def = NULL;
 
 static void nodedef(enum nodedef_type type, const char* name)
@@ -476,6 +477,9 @@ void nodedef_init(void)
 	emit_nodedef();
 	// enable binary search (via nodedef_find()):
 	qsort(nodedefs, n_nodedefs, sizeof nodedefs[0], nodedef_compar);
+
+	union_nodedef_index = nodedef_find(D2, "union");
+	assert(union_nodedef_index > 0);
 }
 
 int nodedef_find(enum nodedef_type type, const char* name)
@@ -498,4 +502,14 @@ int nodedef_find(enum nodedef_type type, const char* name)
 		}
 	}
 	return -1;
+}
+
+const char* nodedef_get_glsl_fn_name(struct nodedef* def, enum glsl_fn_type type)
+{
+	const int n = def->n_glsl_fns;
+	for (int i = 0; i < n; i++) {
+		struct glsl_fn* fn = &def->glsl_fns[i];
+		if (fn->type == type) return fn->name;
+	}
+	return NULL;
 }
