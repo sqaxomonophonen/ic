@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "stb_ds.h"
 
@@ -24,109 +25,90 @@ static void nodedef_end(void)
 {
 	assert(def != NULL);
 	assert(def->name != NULL);
-	switch (def->type) {
-	case NILNODE:
-		break;
-	case SDF3D:
-		assert(def->sdf3d.glsl_sdf3d != NULL);
-		break;
-	case SDF2D:
-		assert(def->sdf2d.glsl_sdf2d != NULL);
-		break;
-	case TX3D:
-		assert(def->tx3d.glsl_tx3d != NULL);
-		break;
-	case TX2D:
-		assert(def->tx2d.glsl_tx2d != NULL);
-		break;
-	case VOLUMIZE:
-		assert(def->volumize.glsl_tx != NULL);
-		break;
-	case D1:
-		assert(def->d1.glsl_d1 != NULL);
-		break;
-	case D2:
-		assert(def->d2.glsl_d2 != NULL);
-		break;
-	default: assert(!"unhandled type");
-	}
+	// FIXME check glsl validity?
 	def = NULL;
 }
 
-static void glsl_sdf3d(const char* src)
+static void glsl_fn(enum glsl_fn_type type, const char* src)
 {
 	assert(def != NULL);
-	assert(def->type == SDF3D);
-	assert(def->sdf3d.glsl_sdf3d == NULL);
-	def->sdf3d.glsl_sdf3d = src;
-}
+	assert(def->n_glsl_fns < MAX_NODEDEF_GLSL_FNS);
 
-static void glsl_sdf2d(const char* src)
-{
-	assert(def != NULL);
-	assert(def->type == SDF2D);
-	assert(def->sdf2d.glsl_sdf2d == NULL);
-	def->sdf2d.glsl_sdf2d = src;
-}
+	struct glsl_fn* fn = &def->glsl_fns[def->n_glsl_fns++];
 
-static void glsl_tx3d(const char* src)
-{
-	assert(def != NULL);
-	assert(def->type == TX3D);
-	assert(def->tx3d.glsl_tx3d == NULL);
-	def->tx3d.glsl_tx3d = src;
-}
+	fn->type = type;
 
-static void glsl_tx2d(const char* src)
-{
-	assert(def != NULL);
-	assert(def->type == TX2D);
-	assert(def->tx2d.glsl_tx2d == NULL);
-	def->tx2d.glsl_tx2d = src;
-}
-
-static void glsl_tx(const char* src)
-{
-	assert(def != NULL);
-	assert(def->type == VOLUMIZE);
-	assert(def->volumize.glsl_tx== NULL);
-	def->volumize.glsl_tx = src;
-}
-
-static void glsl_d1(const char* src)
-{
-	assert(def != NULL);
-	if (def->type == TX2D) {
-		assert(def->tx2d.glsl_d1 == NULL);
-		def->tx2d.glsl_d1 = src;
-	} else if (def->type == TX3D) {
-		assert(def->tx3d.glsl_d1 == NULL);
-		def->tx3d.glsl_d1 = src;
-	} else if (def->type == VOLUMIZE) {
-		assert(def->volumize.glsl_d1 == NULL);
-		def->volumize.glsl_d1  = src;
-	} else if (def->type == D1) {
-		assert(def->d1.glsl_d1 == NULL);
-		def->d1.glsl_d1  = src;
-	} else {
-		assert(!"bad type");
+	const char* postfix = NULL;
+	switch (type) {
+	case FN_SDF3D:
+		assert(def->type == SDF3D);
+		break;
+	case FN_SDF2D:
+		assert(def->type == SDF2D);
+		break;
+	case FN_TX3D_TX:
+		assert(def->type == TX3D);
+		postfix = "tx";
+		break;
+	case FN_TX3D_D1:
+		assert(def->type == TX3D);
+		postfix = "d1";
+		break;
+	case FN_TX2D_TX:
+		assert(def->type == TX2D);
+		postfix = "tx";
+		break;
+	case FN_TX2D_D1:
+		assert(def->type == TX2D);
+		postfix = "d1";
+		break;
+	case FN_D1:
+		assert(def->type == D1);
+		break;
+	case FN_D2_D2:
+		assert(def->type == D2);
+		postfix = "d2";
+		break;
+	case FN_D2_D2M:
+		assert(def->type == D2);
+		postfix = "d2m";
+		break;
+	case FN_VOLUMIZE_TX:
+		assert(def->type == VOLUMIZE);
+		postfix = "tx";
+		break;
+	case FN_VOLUMIZE_D1:
+		assert(def->type == VOLUMIZE);
+		postfix = "d1";
+		break;
 	}
-}
 
-static void glsl_d2(const char* src)
-{
-	assert(def != NULL);
-	assert(def->type == D2);
-	assert(def->d2.glsl_d2 == NULL);
-	def->d2.glsl_d2 = src;
-}
+	char* fname = (char*)malloc(1<<8);
+	sprintf(fname, "%s_%s%s%s",
+		get_nodedef_type_str(def->type),
+		def->name,
+		postfix != NULL ? "_" : "",
+		postfix != NULL ? postfix : "");
+	fn->name = fname;
 
-static void glsl_d2m(const char* src)
-{
-	assert(def != NULL);
-	assert(def->type == D2);
-	assert(def->d2.glsl_d2m == NULL);
-	def->d2.glsl_d2m = src;
+	const size_t srclen = strlen(src);
+	const char* p = src;
+	int pivot = -1;
+	for (size_t i = 0; i < srclen; i++) {
+		char ch = *(p++);
+		if (ch == '$') {
+			pivot = i;
+			break;
+		}
+	}
+	assert((pivot != -1) && "expected to find pivot ($)");
+	const size_t fnamelen = strlen(fn->name);
+
+	char* srcd = (char*)malloc(srclen - 1 + fnamelen + 1);
+	memcpy(srcd, src, pivot);
+	memcpy(srcd+pivot, fn->name, fnamelen);
+	memcpy(srcd+pivot+fnamelen, src+pivot+1, srclen-1-pivot);
+	fn->src = srcd;
 }
 
 static void arg(const char* name, enum nodedef_arg_type type, int argidx)
@@ -163,16 +145,16 @@ static void fn_affine_3d(void (*fn)(gbMat4* m, union nodearg* args))
 {
 	assert(def != NULL);
 	assert(def->type == TX3D);
-	assert(def->tx3d.fn_affine == NULL);
-	def->tx3d.fn_affine = fn;
+	assert(def->fn_affine == NULL);
+	def->fn_affine = fn;
 }
 
 static void fn_affine_2d(void (*fn)(gbMat4* m, union nodearg* args))
 {
 	assert(def != NULL);
 	assert(def->type == TX2D);
-	assert(def->tx2d.fn_affine == NULL);
-	def->tx2d.fn_affine = fn;
+	assert(def->fn_affine == NULL);
+	def->fn_affine = fn;
 }
 
 static void emit_nodedef(void)
@@ -185,7 +167,7 @@ static void emit_nodedef(void)
 
 	nodedef(SDF3D, "sphere");
 	arg("radius", RADIUS, 0);
-	glsl_sdf3d(
+	glsl_fn(FN_SDF3D,
 	"float $(vec3 p, float r)\n"
 	"{\n"
 	"	return length(p)-r;\n"
@@ -197,7 +179,7 @@ static void emit_nodedef(void)
 
 	nodedef(SDF3D, "box");
 	arg("dimensions", DIM3D, 0);
-	glsl_sdf3d(
+	glsl_fn(FN_SDF3D,
 	"float $(vec3 p, vec3 b)\n"
 	"{\n"
 	"	vec3 q = abs(p) - b;\n"
@@ -210,7 +192,7 @@ static void emit_nodedef(void)
 
 	nodedef(SDF2D, "circle");
 	arg("radius", RADIUS, 0);
-	glsl_sdf2d(
+	glsl_fn(FN_SDF2D,
 	"float $(vec2 p, float r)\n"
 	"{\n"
 	"	return length(p)-r;\n"
@@ -222,7 +204,7 @@ static void emit_nodedef(void)
 
 	nodedef(TX3D, "translate");
 	arg("translation", POS3D, 0);
-	glsl_tx3d(
+	glsl_fn(FN_TX3D_TX,
 	"vec3 $(vec3 p, vec3 r)\n"
 	"{\n"
 	"	return p + r;\n"
@@ -235,7 +217,7 @@ static void emit_nodedef(void)
 
 	nodedef(TX2D, "translate");
 	arg("translation", POS2D, 0);
-	glsl_tx2d(
+	glsl_fn(FN_TX2D_TX,
 	"vec2 $(vec2 p, vec2 r)\n"
 	"{\n"
 	"	return p + r;\n"
@@ -248,13 +230,13 @@ static void emit_nodedef(void)
 
 	nodedef(TX3D, "scale");
 	arg("scaling", SCALAR, 0);
-	glsl_tx3d(
+	glsl_fn(FN_TX3D_TX,
 	"vec3 $(vec3 p, float s)\n"
 	"{\n"
 	"	return p / s;\n"
 	"}\n"
 	);
-	glsl_d1(
+	glsl_fn(FN_TX3D_D1,
 	"float $(vec3 _p, float d, float s)\n"
 	"{\n"
 	"	return d * s;\n"
@@ -267,13 +249,13 @@ static void emit_nodedef(void)
 
 	nodedef(TX2D, "scale");
 	arg("scaling", SCALAR, 0);
-	glsl_tx2d(
+	glsl_fn(FN_TX2D_TX,
 	"vec2 $(vec2 p, float s)\n"
 	"{\n"
 	"	return p / s;\n"
 	"}\n"
 	);
-	glsl_d1(
+	glsl_fn(FN_TX2D_D1,
 	"float $(vec3 _p, float d, float s)\n"
 	"{\n"
 	"	return d * s;\n"
@@ -286,7 +268,7 @@ static void emit_nodedef(void)
 
 	nodedef(D1, "round");
 	arg("size", SCALAR, 0);
-	glsl_d1(
+	glsl_fn(FN_D1,
 	"float $(float d, float r)\n"
 	"{\n"
 	"	return d - r;\n"
@@ -298,7 +280,7 @@ static void emit_nodedef(void)
 
 	nodedef(D1, "onion");
 	arg("thickness", SCALAR, 0);
-	glsl_d1(
+	glsl_fn(FN_D1,
 	"float $(float d, float r)\n"
 	"{\n"
 	"	return abs(d) - r;\n"
@@ -309,13 +291,13 @@ static void emit_nodedef(void)
 	/////////////////////////
 
 	nodedef(D2, "union");
-	glsl_d2(
+	glsl_fn(FN_D2_D2,
 	"float $(float d0, float d1)\n"
 	"{\n"
 	"	return min(d0, d1);\n"
 	"}\n"
 	);
-	glsl_d2m(
+	glsl_fn(FN_D2_D2M,
 	"MAT $(float d0, float d1, MAT m0, MAT m1)\n"
 	"{\n"
 	"	return d0 < d1 ? m0 : m1;\n"
@@ -327,7 +309,7 @@ static void emit_nodedef(void)
 
 	nodedef(D2, "smooth_union");
 	arg("size", SCALAR, 0);
-	glsl_d2(
+	glsl_fn(FN_D2_D2,
 	"float $(float d0, float d1, float k)\n"
 	"{\n"
 	"	float h = clamp(0.5 + 0.5*(d1-d0)/k, 0.0, 1.0);\n"
@@ -339,7 +321,7 @@ static void emit_nodedef(void)
 	/////////////////////////
 
 	nodedef(D2, "displace");
-	glsl_d2(
+	glsl_fn(FN_D2_D2,
 	"float $(float d0, float d1)\n"
 	"{\n"
 	"	return d0 + d1;\n"
@@ -351,13 +333,13 @@ static void emit_nodedef(void)
 
 	nodedef(VOLUMIZE, "extrude");
 	arg("depth", SCALAR, 0);
-	glsl_tx(
+	glsl_fn(FN_VOLUMIZE_TX,
 	"vec2 $(vec3 p, float h)\n"
 	"{\n"
 	"	return p.xy;\n"
 	"}\n"
 	);
-	glsl_d1(
+	glsl_fn(FN_VOLUMIZE_D1,
 	"float $(vec3 p, float d, float h)\n"
 	"{\n"
 	"	vec2 w = vec2(d, abs(p.z) - h);\n"
@@ -370,7 +352,7 @@ static void emit_nodedef(void)
 
 	nodedef(VOLUMIZE, "revolve");
 	arg("offset", SCALAR, 0);
-	glsl_tx(
+	glsl_fn(FN_VOLUMIZE_TX,
 	"vec2 $(vec3 p, float o)\n"
 	"{\n"
 	"	return vec2(length(p.xz) - o, p.y);\n"
@@ -382,13 +364,13 @@ static void emit_nodedef(void)
 
 	nodedef(TX3D, "elongate");
 	arg("extent", DIM3D, 0);
-	glsl_tx3d(
+	glsl_fn(FN_TX3D_TX,
 	"vec3 $(vec3 p, vec3 dim)\n"
 	"{\n"
 	"	return max(abs(p) - dim, 0.0);\n"
 	"}\n"
 	);
-	glsl_d1(
+	glsl_fn(FN_TX3D_D1,
 	"vec3 $(vec3 p, float d, vec3 dim)\n"
 	"{\n"
 	"	vec3 q = abs(p) - dim;\n"
