@@ -13,6 +13,7 @@ enum parser_expect_type {
 	EXPECT_STRING_UNTIL_EOL,
 	EXPECT_FLOAT,
 	EXPECT_INT,
+	EXPECT_BOOL,
 	EXPECT_EOL,
 };
 
@@ -21,8 +22,8 @@ enum parser_state {
 	PST_NODE,
 	PST_ARG0,
 	PST_ARG1,
-	PST_NAME,
-	PST_FLAGS,
+	PST_SET0,
+	PST_SET1,
 	PST_EOSTMT,
 	PST_ERROR,
 };
@@ -36,6 +37,8 @@ struct parser {
 	enum nodedef_arg_type nodearg_dst_type;
 	int seq;
 	struct node* root;
+	enum parser_expect_type set1_type;
+	void* set1_ptr;
 };
 
 static void parser_init(struct parser* ps, struct node* root)
@@ -102,12 +105,11 @@ static enum parser_expect_type parser_next(struct parser* ps)
 
 	case PST_NODE:
 	case PST_ARG0:
+	case PST_SET0:
 		return EXPECT_SYMBOL;
 
-	case PST_NAME:  return EXPECT_STRING_UNTIL_EOL;
-	case PST_FLAGS: return EXPECT_SYMBOL_OR_EOL;
-
 	case PST_ARG1: return handle_arg1(ps, NULL, NULL);
+	case PST_SET1: return ps->set1_type;
 
 	default: assert(!"unhandled state");
 	}
@@ -123,14 +125,32 @@ static void parser_push_float(struct parser* ps, double f)
 		*dst = f;
 		ps->seq++;
 		if (ps->seq == n) ps->st = PST_EOSTMT;
+	} else if (ps->st == PST_SET1) {
+		*(float*)ps->set1_ptr = f;
+		ps->st = PST_EOSTMT;
 	} else {
 		assert(!"unhandled state");
 	}
 }
 
+static void parser_push_bool(struct parser* ps, bool b)
+{
+	if (ps->st == PST_SET1) {
+		*(bool*)ps->set1_ptr = b;
+		ps->st = PST_EOSTMT;
+	} else {
+		assert(!"unhandled state");
+	}
+}
+
+
 static void parser_push_int(struct parser* ps, long i)
 {
-	assert(!"TODO");
+	if (ps->st == PST_SET1) {
+		*(int*)ps->set1_ptr = i;
+	} else {
+		assert(!"unhandled state");
+	}
 }
 
 static bool strmemeq(const char* c_str, const char* s0, const char* s1)
@@ -152,6 +172,12 @@ static void mkcstr(char* dst, size_t dstcap, const char* s0, const char* s1)
 	char NAME[1<<12]; \
 	mkcstr(NAME, sizeof NAME, S0, S1);
 
+static void setset(struct parser* ps, enum parser_expect_type type, void* ptr)
+{
+	ps->st = PST_SET1;
+	ps->set1_type = type;
+	ps->set1_ptr = ptr;
+}
 
 static void parser_push_string(struct parser* ps, const char* s0, const char* s1)
 {
@@ -175,10 +201,8 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 			ps->st = PST_EOSTMT;
 		} else if (strmemeq("arg", s0, s1)) {
 			ps->st = PST_ARG0;
-		} else if (strmemeq("name", s0, s1)) {
-			ps->st = PST_NAME;
-		} else if (strmemeq("flags", s0, s1)) {
-			ps->st = PST_FLAGS;
+		} else if (strmemeq("set", s0, s1)) {
+			ps->st = PST_SET0;
 		} else {
 			STACK_CSTR(str, s0, s1);
 			parser_error(ps, "unhandled string [%s]", str);
@@ -252,14 +276,6 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		ps->st = PST_EOSTMT;
 
 		} break;
-	case PST_NAME: {
-		struct node* node = parser_top(ps);
-		const size_t n = s1-s0;
-		node->name = (char*)malloc(n+1);
-		memcpy(node->name, s0, n);
-		node->name[n] = 0;
-		ps->st = PST0;
-		} break;
 	case PST_ARG0: {
 		struct node* node = parser_top(ps);
 		const int t = node->type;
@@ -289,6 +305,26 @@ static void parser_push_string(struct parser* ps, const char* s0, const char* s1
 		} else {
 			assert(!"TODO special args?");
 		}
+		} break;
+	case PST_SET0: {
+		struct node* node = parser_top(ps);
+		if (strmemeq("name", s0, s1)) {
+			setset(ps, EXPECT_STRING_UNTIL_EOL, &node->name);
+		} else if (strmemeq("inline", s0, s1)) {
+			setset(ps, EXPECT_BOOL, &node->inline_child);
+		} else {
+			STACK_CSTR(str, s0, s1);
+			parser_error(ps, "unhandled set-key [%s] (3)", str);
+		}
+		} break;
+	case PST_SET1: {
+		struct node* node = parser_top(ps);
+		const size_t n = s1-s0;
+		char* s = (char*)malloc(n+1);
+		memcpy(s, s0, n);
+		s[n] = 0;
+		*(char**)ps->set1_ptr = s;
+		ps->st = PST0;
 		} break;
 	default: assert(!"unhandled state");
 	}
@@ -388,6 +424,7 @@ void parse_file(const char* path, struct node* root)
 		case EXPECT_SYMBOL:
 		case EXPECT_FLOAT:
 		case EXPECT_INT:
+		case EXPECT_BOOL:
 			eat_token = true;
 			break;
 		default: assert(!"unhandled type");
@@ -426,6 +463,7 @@ void parse_file(const char* path, struct node* root)
 				}
 				parser_push_float(&ps, f);
 				} break;
+			case EXPECT_BOOL:
 			case EXPECT_INT: {
 				long i = strtol(tmp, &endptr, 10);
 				if (endptr == tmp) {
@@ -433,7 +471,13 @@ void parse_file(const char* path, struct node* root)
 					parse_error = true;
 					break;
 				}
-				parser_push_int(&ps, i);
+				if (expect_type == EXPECT_BOOL) {
+					parser_push_bool(&ps, i != 0);
+				} else if (expect_type == EXPECT_INT) {
+					parser_push_int(&ps, i);
+				} else {
+					assert(!"unreachable");
+				}
 				} break;
 			default: assert(!"unhandled type");
 			}
