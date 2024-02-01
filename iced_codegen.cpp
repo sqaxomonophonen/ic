@@ -245,7 +245,7 @@ static const char* maprec(struct node* node, const char* pvar, int dim)
 			if (fn != NULL) {
 				assert(dvar != NULL);
 				dv1 = mkvar("d");
-				srcf("\tfloat %s = %s(%s\n", dv1, fn, dvar);
+				srcf("\tfloat %s = %s(%s", dv1, fn, dvar);
 				calltail(def, node);
 				dvar = dv1;
 			}
