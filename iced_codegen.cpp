@@ -130,19 +130,9 @@ static const char* maprec(struct node* node, const char* pvar, int dim)
 		switch (def->type) {
 
 		case TX3D:
-			assert(dim == 3);
-			fn = nodedef_get_glsl_fn_name(def, FN_TX3D_TX);
-			assert(fn != NULL);
-			pv1 = mkvar("p");
-			srcf("\tvec%d %s = %s(%s", dim, pv1, fn, pv0);
-			calltail(def, node);
-			pv0 = pv1;
-			do_implicit_union = true;
-			break;
-
 		case TX2D:
-			assert(dim == 2);
-			fn = nodedef_get_glsl_fn_name(def, FN_TX2D_TX);
+			assert((def->type == TX3D && dim == 3) || (def->type == TX2D && dim == 2));
+			fn = nodedef_get_glsl_fn_name(def, def->type == TX3D ? FN_TX3D_TX : def->type == TX2D ? FN_TX2D_TX : (enum glsl_fn_type)-1);
 			assert(fn != NULL);
 			pv1 = mkvar("p");
 			srcf("\tvec%d %s = %s(%s", dim, pv1, fn, pv0);
@@ -210,22 +200,12 @@ static const char* maprec(struct node* node, const char* pvar, int dim)
 		switch (def->type) {
 
 		case SDF3D:
-			assert(dim == 3);
-			assert(arrlen(node->child_arr) == 0);
-			assert(dvar == NULL);
-			dvar = mkvar("d");
-			fn = nodedef_get_glsl_fn_name(def, FN_SDF3D);
-			assert(fn != NULL);
-			srcf("\tfloat %s = %s(%s", dvar, fn, pv0);
-			calltail(def, node);
-			break;
-
 		case SDF2D:
-			assert(dim == 2);
+			assert((def->type == SDF3D && dim == 3) || (def->type == SDF2D && dim == 2));
 			assert(arrlen(node->child_arr) == 0);
 			assert(dvar == NULL);
 			dvar = mkvar("d");
-			fn = nodedef_get_glsl_fn_name(def, FN_SDF2D);
+			fn = nodedef_get_glsl_fn_name(def, def->type == SDF3D ? FN_SDF3D : def->type == SDF2D ? FN_SDF2D : (enum glsl_fn_type)-1);
 			assert(fn != NULL);
 			srcf("\tfloat %s = %s(%s", dvar, fn, pv0);
 			calltail(def, node);
