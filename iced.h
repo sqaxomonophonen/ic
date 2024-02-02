@@ -120,7 +120,6 @@ void nodedef_init(void);
 int nodedef_find(enum nodedef_type type, const char* name);
 const char* nodedef_get_glsl_fn_name(struct nodedef*, enum glsl_fn_type);
 
-void parse_file(const char* path, struct node* root);
 void iced_codegen(struct node* root);
 
 extern int n_nodedefs;

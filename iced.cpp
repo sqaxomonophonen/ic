@@ -53,10 +53,27 @@ static bool node_is_leaf(struct node* node)
 	assert(!"unreachable");
 }
 
+#if 0
+static char* read_file(const char* path, size_t* out_size)
+{
+	FILE* f = fopen(path, "rb");
+	if (f == NULL) return NULL;
+	assert(fseek(f, 0, SEEK_END) == 0);
+	long sz = ftell(f);
+	assert(fseek(f, 0, SEEK_SET) == 0);
+	char* p = (char*)malloc(sz+1);
+	assert(fread(p, sz, 1, f) == 1);
+	assert(fclose(f) == 0);
+	p[sz] = 0;
+	if (out_size != NULL) *out_size = sz;
+	return p;
+}
+#endif
+
+
 void iced_init(void)
 {
 	nodedef_init();
-	parse_file("ic.tree", &root_node);
 
 	lua_State* L = luaL_newstate();
 	luaL_openlibs(L);
