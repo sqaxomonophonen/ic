@@ -3,9 +3,13 @@ CXXFLAGS+=-std=c++11
 LDLIBS+=-lm -pthread
 CXXFLAGS+=-O0 -g
 
+
 PKGS=sdl2 gl
 CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
 LDLIBS+=$(shell pkg-config --libs ${PKGS})
+
+CXXFLAGS+=-I./lua
+LDLIBS+=-L./lua -llua
 
 all: iced_sdl2_opengl4
 

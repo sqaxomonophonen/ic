@@ -1,10 +1,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+
+extern "C" {
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+}
+
 #include "imgui.h"
 #include "util.h"
 #include "iced.h"
-
 #include "stb_ds.h"
 
 static bool show_window_tree = true;
@@ -51,6 +57,9 @@ void iced_init(void)
 {
 	nodedef_init();
 	parse_file("ic.tree", &root_node);
+
+	lua_State* L = luaL_newstate();
+	luaL_openlibs(L);
 }
 
 static void ui_node(struct node* node)
