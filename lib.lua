@@ -160,27 +160,30 @@ function RESET(dim)
 	stackpush(dim, p0)
 end
 
-local function djoin(...)
-	local function djoin2(d0, d1)
-		if d0 == nil then
-			return d1
-		elseif d1 == nil then
-			return d0
-		else
-			local g = ST.mapgen
-			local d2 = g:var("d")
-			local fn = defmap["d21:union"].glsl_names.d21
-			assert(fn, "missing depdef")
-			g:linef("\tfloat %s = %s(%s, %s);", d2, fn, d0, d1)
-			return d2
-		end
+local function rjoin(e0, e1)
+	local implicit = defmap["d21:union"]
+	local def = e0.def or implicit
+	local fn = def.glsl_names.d21
+	local argstr = e0.glsl_argstr or ""
+	if not fn then
+		fn = implicit.glsl_names.d21
+		assert(fn, "missing depdef")
+		argstr = ""
 	end
-	local d = nil
-	local args = {...}
-	for i=1,#args do
-		d = djoin2(d, args[i])
+
+	local d0 = e0.dvar
+	local d1 = e1.dvar
+	local d
+	if d0 == nil then
+		d = d1
+	elseif d1 == nil then
+		d = d0
+	else
+		local g = ST.mapgen
+		d = g:var("d")
+		g:linef("\tfloat %s = %s(%s, %s%s);", d, fn, d0, d1, argstr)
 	end
-	return d
+	e0.dvar = d
 end
 
 function EMIT()
@@ -210,7 +213,7 @@ function pop(n)
 
 		table.remove(ST.stack)
 		local top1 = stacktop()
-		top1.dvar = djoin(top1.dvar, top0.dvar)
+		rjoin(top1, top0)
 	end
 end
 function chain()
@@ -223,7 +226,7 @@ end
 function DEF(def)
 	local name = def[1]
 	defmap[name] = def
-	local name0, name1 = string.gmatch(name, "(%w+):(%w+)")()
+	local name0, name1 = string.gmatch(name, "(%w+):([%w_]+)")()
 	if name0 == nil then
 		error("name '" .. name .. "' not in a:b form")
 	end
@@ -310,12 +313,24 @@ function DEF(def)
 			local dn = g:var("d")
 			g:linef("\tfloat %s = %s(%s%s);", dn, fn_map, p, glsl_argstr)
 			is_leaf = true
-			top.dvar = djoin(top.dvar, dn)
+			rjoin(top, {dvar=dn})
 		end
+
+		local stack0 = #ST.stack
 
 		if not is_leaf then
 			stackpush(D1, p, def, glsl_argstr)
 		end
+
+		return setmetatable({
+		}, {
+			__close = function(self)
+				local stack1 = #ST.stack
+				local n = stack1 - stack0
+				assert(n > 0, string.format("closer expected request to pop at least 1 element; got %d", n))
+				pop(n)
+			end,
+		})
 	end
 end
 
