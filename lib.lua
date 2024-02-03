@@ -36,6 +36,23 @@ function contains(xs, x)
 	return false
 end
 
+function ksortpairs(xs)
+	local keys = {}
+	for k in pairs(xs) do
+		table.insert(keys,k)
+	end
+	table.sort(keys)
+	local i = 1
+	local n <const> = #keys
+	return function()
+		if i > n then return nil end
+		local k = keys[i]
+		local v = xs[k]
+		i = i + 1
+		return k,v
+	end
+end
+
 local mkgen = (function()
 	local MT = {
 		__index = {
@@ -49,6 +66,14 @@ local mkgen = (function()
 				local n = prefix .. s[prefix]
 				s[prefix] = s[prefix] + 1
 				return n
+			end,
+			constant = function(self, typ, lit)
+				if not self.const_map[lit] then
+					local c = self:var("c")
+					self:linef("\t%s %s = %s;", typ, c, lit)
+					self.const_map[lit] = c
+				end
+				return self.const_map[lit]
 			end,
 			line = function(self, line)
 				assert(type(self) == "table")
@@ -68,6 +93,7 @@ local mkgen = (function()
 		return setmetatable({
 			lines = {},
 			variable_serials = {},
+			const_map = {},
 		}, MT)
 	end
 end)()
@@ -87,18 +113,36 @@ d11      = NODECLASS{            F={"d11"}}
 d21      = NODECLASS{            F={"d21","d2m21"}}
 
 local ST
-local function stackpush(D,pvar,def,glsl_argnames)
+local function stackpush(D,pvar,def,glsl_argstr)
 	table.insert(ST.stack, {
 		D=D,
 		pvar=pvar,
 		def=def,
-		glsl_argnames=glsl_argnames,
-		dvars={},
+		glsl_argstr=glsl_argstr,
+		dvar=nil,
 	})
 end
 local function stacktop()
 	return ST.stack[#ST.stack]
 end
+
+local defmap = {}
+
+local function depdef(name)
+	if ST.defset[name] ~= nil then
+		return
+	end
+	ST.defset[name] = true
+	local def = defmap[name]
+	for k,src in ksortpairs(def.glsl or {}) do
+		local fn = def.glsl_names[k]
+		local src, nsub = string.gsub(src, "[$]", fn)
+		assert(nsub == 1, "expected one $-substitution for " .. fn .. " source")
+		src = untab(src)
+		table.insert(ST.src0, src)
+	end
+end
+
 function RESET(dim)
 	ST = {
 		defset = {},
@@ -107,6 +151,8 @@ function RESET(dim)
 		mapgen = mkgen(),
 	}
 
+	depdef("d21:union")
+
 	local g = ST.mapgen
 	local p0 = g:var("p")
 	g:linef("float map(vec%d %s)", dim, p0)
@@ -114,21 +160,57 @@ function RESET(dim)
 	stackpush(dim, p0)
 end
 
+local function djoin(...)
+	local function djoin2(d0, d1)
+		if d0 == nil then
+			return d1
+		elseif d1 == nil then
+			return d0
+		else
+			local g = ST.mapgen
+			local d2 = g:var("d")
+			local fn = defmap["d21:union"].glsl_names.d21
+			assert(fn, "missing depdef")
+			g:linef("\tfloat %s = %s(%s, %s);", d2, fn, d0, d1)
+			return d2
+		end
+	end
+	local d = nil
+	local args = {...}
+	for i=1,#args do
+		d = djoin2(d, args[i])
+	end
+	return d
+end
+
 function EMIT()
 	assert(#ST.stack == 1, "expected one element (root) on stack, got " .. #ST.stack)
 	print(table.concat(ST.src0, "\n"))
 	local g = ST.mapgen
-	g:linef("\treturn %s;", "TODO") -- TODO
+	g:linef("\treturn %s;", stacktop().dvar)
 	g:line("}")
 	print(g:src())
 end
 
 function pop(n)
 	if n == nil then n = 1 end
+	local g = ST.mapgen
 	for i=1,n do
 		-- XXX TODO chaining can cause n to be larger?
 		assert(#ST.stack >= 2, "stack underflow (cannot pop root element)")
+		local top0 = stacktop()
+		local def = top0.def
+
+		local fn_d11 = def.glsl_names.d11
+		if fn_d11 then
+			local dn = g:var("d")
+			g:linef("\tfloat %s = %s(%s%s);", dn, fn_d11, top0.dvar, top0.glsl_argstr)
+			top0.dvar = dn
+		end
+
 		table.remove(ST.stack)
+		local top1 = stacktop()
+		top1.dvar = djoin(top1.dvar, top0.dvar)
 	end
 end
 function chain()
@@ -140,6 +222,7 @@ end
 
 function DEF(def)
 	local name = def[1]
+	defmap[name] = def
 	local name0, name1 = string.gmatch(name, "(%w+):(%w+)")()
 	if name0 == nil then
 		error("name '" .. name .. "' not in a:b form")
@@ -163,7 +246,6 @@ function DEF(def)
 		local args = {...}
 		assert(#args == #argfmt, "expected " .. #argfmt .. " argument(s) for " .. name .. "() but got " .. #args)
 		local g = ST.mapgen
-		local glsl_argnames = {}
 
 		local glsl_argstr = ""
 		for i=1,#argfmt do
@@ -172,36 +254,33 @@ function DEF(def)
 			local function expect(p, t)
 				assert(p, "expected " .. name .. "() arg #" .. i .. " to be " .. t)
 			end
-			local a = g:var("a")
-			table.insert(glsl_argnames, a)
-			glsl_argstr = glsl_argstr .. ", " .. a
+
+			local typ, lit
 			if ch == "1" then
 				expect(type(arg) == "number", "number")
-				g:linef("\tfloat %s = %f;", a, arg)
+				typ = "float"
+				lit = string.format("%f", arg)
 			elseif ch == "2" then
-				expect(isvec2(arg), "vec2")
-				g:linef("\tvec2 %s = vec2(%f,%f);", a, arg[1], arg[2])
+				typ = "vec2"
+				expect(isvec2(arg), typ)
+				lit = string.format("%s(%f,%f)", typ, arg[1], arg[2])
 			elseif ch == "3" then
-				expect(isvec3(arg), "vec3")
-				g:linef("\tvec3 %s = vec3(%f,%f,%f);", a, arg[1], arg[2], arg[3])
+				typ = "vec3"
+				expect(isvec3(arg), typ)
+				lit = string.format("%s(%f,%f,%f)", typ, arg[1], arg[2], arg[3])
 			elseif ch == "4" then
-				expect(isvec4(arg), "vec4")
-				g:linef("\tvec4 %s = vec4(%f,%f,%f,%f);", a, arg[1], arg[2], arg[3], arg[4])
+				typ = "vec4"
+				expect(isvec4(arg), typ)
+				lit = string.format("%s(%f,%f,%f,%f)", typ, arg[1], arg[2], arg[3], arg[4])
 			else
 				error("unhandled argfmt char: " .. ch)
 			end
+
+			local c = g:constant(typ, lit)
+			glsl_argstr = glsl_argstr .. ", " .. c
 		end
 
-		if ST.defset[name] == nil then
-			ST.defset[name] = true
-			for k,src in pairs(def.glsl or {}) do
-				local fn = def.glsl_names[k]
-				local src, nsub = string.gsub(src, "[$]", fn)
-				assert(nsub == 1, "expected one $-substitution for " .. fn .. " source")
-				src = untab(src)
-				table.insert(ST.src0, src)
-			end
-		end
+		depdef(name)
 
 		local fn_tx = def.glsl_names.tx
 		local fn_map = def.glsl_names.map
@@ -231,11 +310,11 @@ function DEF(def)
 			local dn = g:var("d")
 			g:linef("\tfloat %s = %s(%s%s);", dn, fn_map, p, glsl_argstr)
 			is_leaf = true
-			table.insert(top.dvars, dn)
+			top.dvar = djoin(top.dvar, dn)
 		end
 
 		if not is_leaf then
-			stackpush(D1, p, def, glsl_argnames)
+			stackpush(D1, p, def, glsl_argstr)
 		end
 	end
 end
