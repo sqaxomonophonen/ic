@@ -17,7 +17,7 @@ LDLIBS+=-L./imgui -limgui
 all: iced_sdl2_opengl4
 
 
-iced_sdl2_opengl4: iced_main_sdl2_opengl4.o iced.o iced_nodedef.o iced_codegen.o gb_math.o stb_ds.o
+iced_sdl2_opengl4: iced_main_sdl2_opengl4.o iced.o gb_math.o stb_ds.o
 	$(CXX) $^ $(LDLIBS) -o $@
 
 clean:
