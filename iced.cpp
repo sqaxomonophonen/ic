@@ -77,6 +77,8 @@ void iced_init(void)
 
 	lua_State* L = luaL_newstate();
 	luaL_openlibs(L);
+	assert(luaL_dofile(L, "lib.lua") == 0);
+	assert(luaL_dofile(L, "world.lua") == 0);
 }
 
 static void ui_node(struct node* node)

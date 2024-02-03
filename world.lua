@@ -1,0 +1,9 @@
+require("lib")
+--require("other")
+RESET(3)
+tx3d:translate{1,2,3}
+tx3d:translate{1.1,2.2,3.3}
+sdf3d:sphere(1)
+pop()
+pop()
+EMIT()
