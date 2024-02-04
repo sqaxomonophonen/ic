@@ -197,7 +197,7 @@ static void lua_stuff(void)
 				if (do_run) {
 					lua_getglobal(L, "run_view");
 					lua_pushvalue(L, -2);
-					int e = lua_pcall(L, 1, 0, 0);
+					int e = ecall(L, 1, 0);
 					if (e != 0) {
 						handle_lua_error();
 					}
