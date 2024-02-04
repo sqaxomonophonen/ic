@@ -16,6 +16,8 @@ extern "C" {
 #include "util.h"
 #include "iced.h"
 #include "stb_ds.h"
+#include "gb_math.h"
+#include "gl3w.h"
 
 static bool show_window_tree = true;
 static bool show_window_node = true;
@@ -74,7 +76,7 @@ static inline int timespec_compar(const struct timespec* ta, const struct timesp
 	}
 }
 
-static int l_watch_file(lua_State* L)
+static int lc_watch_file(lua_State* L)
 {
 	const int n = lua_gettop(L);
 	if (n >= 1) watch_file(lua_tostring(L, 1));
@@ -175,8 +177,8 @@ static void lua_reload(void)
 	lua_State* L = g.L = luaL_newstate();
 	luaL_openlibs(L);
 
-	lua_pushcfunction(L, l_watch_file);
-	lua_setglobal(L, "watch_file");
+	lua_pushcfunction(L, lc_watch_file);
+	lua_setglobal(L, "lc_watch_file");
 
 	l_load(L, "lib.lua");
 	l_load(L, "world.lua");
@@ -209,49 +211,122 @@ void iced_init(void)
 	lua_reload();
 }
 
-static void lua_stuff(void)
+#if 0
+// TODO
+struct view {
+	char* view_id;
+	int dim;
+	char* glsl; // XXX? uhhhh... probably don't need to store the source?
+
+};
+#endif
+
+struct view_window {
+	const char* view_id; // e.g. "main"
+	const char* window_title; // e.g. "main##1"
+	gbVec3 origin;
+	float fov;
+	float pitch;
+	float yaw;
+	int width;
+	int height;
+	// TODO GL resources: texture, framebuffer...
+};
+
+static struct view_window* view_window_arr;
+
+static bool window_view(struct view_window* w)
 {
-	lua_State* L = g.L;
-	if (L != NULL) {
-		lua_getglobal(L, "view_names");
-		if (lua_istable(L, -1)) {
-			unsigned n = lua_rawlen(L, -1);
-			for (unsigned i = 1; i <= n; i++) {
-				lua_rawgeti(L, -1, i);
-				const char* name = lua_tostring(L, -1);
-				bool do_run = ImGui::Button(name);
-				if (do_run) {
-					lua_getglobal(L, "run_view");
-					lua_pushvalue(L, -2);
-					int e = ecall(L, 1, 0);
-					if (e != 0) {
-						handle_lua_error();
+	bool show = true;
+	if (ImGui::Begin(w->window_title, &show)) {
+	}
+	ImGui::End();
+	return show;
+}
+
+static void lua_api_error(const char* msg)
+{
+	g.lua_error = true;
+	snprintf(g.lua_error_message, sizeof g.lua_error_message, "[API ERROR] %s", msg);
+}
+
+static void window_main(void)
+{
+	static bool show_main = true;
+	if (show_main) {
+		if (ImGui::Begin("Main", &show_main)) {
+			lua_State* L = g.L;
+			if (L != NULL && !g.lua_error) {
+				lua_getglobal(L, "ll_views");
+				if (!lua_istable(L, -1)) {
+					lua_api_error("no global table named \"ll_views\"");
+				} else {
+					unsigned n = lua_rawlen(L, -1);
+					for (unsigned i = 1; i <= n; i++) {
+						lua_rawgeti(L, -1, i);
+
+						lua_getfield(L, -1, "dim");
+						const int dim = lua_tointeger(L, -1);
+						if (dim != 2 && dim != 3) {
+							lua_api_error("view dimension is not 2 or 3");
+							break;
+						}
+						lua_pop(L, 1);
+
+						if (i == 1) ImGui::SeparatorText("Views");
+						if (i >= 2) ImGui::SameLine();
+
+						lua_getfield(L, -1, "name");
+						const char* name = lua_tostring(L, -1);
+
+						char buf[1<<10];
+						snprintf(buf, sizeof buf, "[%dD] %s##i=%d", dim, name, i);
+						lua_pop(L, 1);
+
+						bool do_run = ImGui::Button(buf);
+						if (do_run) {
+							lua_getglobal(L, "ll_view_run");
+							lua_pushvalue(L, -2);
+							int e = ecall(L, 1, 1);
+							if (e != 0) {
+								handle_lua_error();
+							} else {
+								const char* src = lua_tostring(L, -1);
+								printf("src=%s\n", src);
+								lua_pop(L, 1);
+							}
+						}
+						lua_pop(L, 1);
 					}
 				}
 				lua_pop(L, 1);
 			}
+
+			if (g.lua_error) {
+				ImGui::SeparatorText("Lua Error");
+				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.lua_error_message);
+			}
+
+			ImGui::SeparatorText("Status");
+			ImGui::Text("Load: %fs / Call: %fs / Stack: %d",
+				g.duration_load,
+				g.duration_call,
+				lua_gettop(L));
 		}
-		lua_pop(L, 1);
+		ImGui::End();
 	}
-
-	if (g.lua_error) {
-		ImGui::TextUnformatted(g.lua_error_message);
-	}
-
-	ImGui::Text("TOP: %d", lua_gettop(L));
-	ImGui::Text("Load: %fs", g.duration_load);
-	ImGui::Text("Call: %fs", g.duration_call);
 }
 
 void iced_gui(void)
 {
 	check_for_reload();
+	window_main();
 
-	static bool show_main = true;
-	if (show_main) {
-		if (ImGui::Begin("Main", &show_main)) {
-			lua_stuff();
+	for (int i = 0; i < arrlen(view_window_arr); i++) {
+		if (!window_view(&view_window_arr[i])) {
+			arrdel(view_window_arr, i);
+			i--;
 		}
-		ImGui::End();
 	}
+
 }

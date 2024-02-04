@@ -5,7 +5,7 @@ local save = {
 require = function(x)
 	local file = x .. ".lua"
 	if not save._required[file] then
-		watch_file(file)
+		lc_watch_file(file)
 		save._required[file] = true
 	end
 	return save.require(x)
@@ -204,18 +204,26 @@ function EMIT()
 	return table.concat(ST.src0, "\n") .. g:src()
 end
 
-view_names = {}
-views = {}
-function run_view(name)
-	RESET(3)
-	assert(views[name], "no such view")
-	views[name]()
-	print(EMIT())
+ll_views = {}
+local name_view_map = {}
+local function mk_view_ctor(dim)
+	return function(name, ctor)
+		assert(not name_view_map[name], "duplicate view definition for "..name)
+		local view = {
+			dim = dim,
+			name = name,
+			ctor = ctor,
+		}
+		table.insert(ll_views, view)
+		name_view_map[name] = view
+	end
 end
-function view3d(name, ctor)
-	assert(not views[name], "")
-	views[name] = ctor
-	view_names = ksorted(views)
+view2d = mk_view_ctor(2)
+view3d = mk_view_ctor(3)
+function ll_view_run(view)
+	RESET(view.dim)
+	view.ctor()
+	return EMIT()
 end
 
 function pop(n)
