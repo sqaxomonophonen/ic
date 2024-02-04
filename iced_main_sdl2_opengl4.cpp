@@ -14,7 +14,7 @@
 
 #include "iced.h"
 
-struct globals {
+static struct globals {
 } g;
 
 #define CHKGL { GLenum xx_GLERR = glGetError(); if (xx_GLERR != GL_NO_ERROR) { fprintf(stderr, "OPENGL ERROR %d in %s:%d", xx_GLERR, __FILE__, __LINE__); abort(); } }

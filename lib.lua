@@ -1,8 +1,13 @@
 local save = {
+	_required={},
 	require=require,
 }
 require = function(x)
-	print("TODO install reload watch " .. x .. ".lua")
+	local file = x .. ".lua"
+	if not save._required[file] then
+		watch_file(file)
+		save._required[file] = true
+	end
 	return save.require(x)
 end
 

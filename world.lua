@@ -1,4 +1,3 @@
-require("lib")
 --require("other")
 RESET(3)
 
