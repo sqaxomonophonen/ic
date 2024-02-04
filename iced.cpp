@@ -42,7 +42,9 @@ static struct globals {
 	char lua_error_message[1<<12];
 	lua_State* L;
 	char* watch_paths_arr;
-	struct timespec tt;
+	struct timespec last_load_time;
+	double duration_load;
+	double duration_call;
 } g;
 
 static void watch_file(const char* path)
@@ -94,23 +96,44 @@ static int l_errhandler(lua_State *L)
 	return 1;
 }
 
+static struct timespec timer_begin(void)
+{
+	struct timespec t0;
+	assert(clock_gettime(CLOCK_MONOTONIC, &t0) == 0);
+	return t0;
+}
+
+static double timer_end(struct timespec t0)
+{
+	struct timespec t1;
+	assert(clock_gettime(CLOCK_MONOTONIC, &t1) == 0);
+	return
+		((double)(t1.tv_sec) - (double)(t0.tv_sec)) +
+		1e-9 * ((double)(t1.tv_nsec) - (double)(t0.tv_nsec));
+}
+
 static int ecall(lua_State *L, int narg, int nres)
 {
 	// "stolen" from `docall()` in `lua.c`
+	struct timespec t0 = timer_begin();
 	int base = lua_gettop(L) - narg;
 	lua_pushcfunction(L, l_errhandler);
 	lua_insert(L, base);
 	int e = lua_pcall(L, narg, nres, base);
 	lua_remove(L, base);
+	g.duration_call = timer_end(t0);
 	return e;
 }
 
 static int edofile(lua_State *L, const char* path)
 {
+	struct timespec t0 = timer_begin();
 	int e;
 	e = luaL_loadfile(L, path);
 	if (e != 0) return e;
-	return ecall(L, 0, LUA_MULTRET);
+	e = ecall(L, 0, LUA_MULTRET);
+	g.duration_load = timer_end(t0);
+	return e;
 }
 
 
@@ -137,8 +160,8 @@ static void l_load(lua_State* L, const char* path)
 
 static void lua_reload(void)
 {
-	assert(clock_gettime(CLOCK_REALTIME, &g.tt) == 0);
-	//dump_timespec(&g.tt);
+	assert(clock_gettime(CLOCK_REALTIME, &g.last_load_time) == 0);
+	//dump_timespec(&g.last_load_time);
 
 	if (g.L != NULL) {
 		lua_close(g.L);
@@ -146,6 +169,8 @@ static void lua_reload(void)
 	}
 	g.lua_error = false;
 	arrsetlen(g.watch_paths_arr, 0);
+	g.duration_load = 0;
+	g.duration_call = 0;
 
 	lua_State* L = g.L = luaL_newstate();
 	luaL_openlibs(L);
@@ -167,7 +192,7 @@ static void check_for_reload(void)
 		const size_t n = strlen(p);
 		struct stat st;
 		if (stat(p, &st) == 0) {
-			if (timespec_compar(&st.st_mtim, &g.tt) > 0) {
+			if (timespec_compar(&st.st_mtim, &g.last_load_time) > 0) {
 				reload = true;
 				break;
 			}
@@ -214,6 +239,8 @@ static void lua_stuff(void)
 	}
 
 	ImGui::Text("TOP: %d", lua_gettop(L));
+	ImGui::Text("Load: %fs", g.duration_load);
+	ImGui::Text("Call: %fs", g.duration_call);
 }
 
 void iced_gui(void)
