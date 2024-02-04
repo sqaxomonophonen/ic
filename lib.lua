@@ -41,12 +41,17 @@ function contains(xs, x)
 	return false
 end
 
-function ksortpairs(xs)
+function ksorted(xs)
 	local keys = {}
 	for k in pairs(xs) do
 		table.insert(keys,k)
 	end
 	table.sort(keys)
+	return keys
+end
+
+function ksortpairs(xs)
+	local keys = ksorted(xs)
 	local i = 1
 	local n <const> = #keys
 	return function()
@@ -193,11 +198,24 @@ end
 
 function EMIT()
 	assert(#ST.stack == 1, "expected one element (root) on stack, got " .. #ST.stack)
-	print(table.concat(ST.src0, "\n"))
 	local g = ST.mapgen
 	g:linef("\treturn %s;", stacktop().dvar)
 	g:line("}")
-	print(g:src())
+	return table.concat(ST.src0, "\n") .. g:src()
+end
+
+view_names = {}
+views = {}
+function run_view(name)
+	RESET(3)
+	assert(views[name], "no such view")
+	views[name]()
+	print(EMIT())
+end
+function view3d(name, ctor)
+	assert(not views[name], "")
+	views[name] = ctor
+	view_names = ksorted(views)
 end
 
 function pop(n)

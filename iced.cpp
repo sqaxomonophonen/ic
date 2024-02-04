@@ -79,16 +79,22 @@ static int l_watch_file(lua_State* L)
 	return 0;
 }
 
+static void handle_lua_error(void)
+{
+	lua_State* L = g.L;
+	g.lua_error = true;
+	const char* err = lua_tostring(L, -1);
+	fprintf(stderr, "LUA ERROR: %s\n", err);
+	snprintf(g.lua_error_message, sizeof g.lua_error_message, "%s", err);
+}
+
 static void l_load(lua_State* L, const char* path)
 {
 	watch_file(path);
 	if (g.lua_error) return;
 	int e = luaL_dofile(L, path);
 	if (e != 0) {
-		g.lua_error = true;
-		const char* err = lua_tostring(L, -1);
-		fprintf(stderr, "LUA ERROR: %s\n", err);
-		snprintf(g.lua_error_message, sizeof g.lua_error_message, "%s", err);
+		handle_lua_error();
 		return;
 	}
 }
@@ -142,6 +148,36 @@ void iced_init(void)
 	lua_reload();
 }
 
+static void lua_stuff(void)
+{
+	lua_State* L = g.L;
+	if (L != NULL) {
+		lua_getglobal(L, "view_names");
+		if (lua_istable(L, -1)) {
+			unsigned n = lua_rawlen(L, -1);
+			for (unsigned i = 1; i <= n; i++) {
+				lua_rawgeti(L, -1, i);
+				const char* name = lua_tostring(L, -1);
+				bool do_run = ImGui::Button(name);
+				if (do_run) {
+					lua_getglobal(L, "run_view");
+					lua_pushvalue(L, -2);
+					int e = lua_pcall(L, 1, 0, 0);
+					if (e != 0) {
+						handle_lua_error();
+					}
+				}
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+	}
+
+	if (g.lua_error) {
+		ImGui::TextUnformatted(g.lua_error_message);
+	}
+}
+
 void iced_gui(void)
 {
 	check_for_reload();
@@ -149,10 +185,7 @@ void iced_gui(void)
 	static bool show_main = true;
 	if (show_main) {
 		if (ImGui::Begin("Main", &show_main)) {
-			ImGui::Button("TODO");
-			if (g.lua_error) {
-				ImGui::TextUnformatted(g.lua_error_message);
-			}
+			lua_stuff();
 		}
 		ImGui::End();
 	}
