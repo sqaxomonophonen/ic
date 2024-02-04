@@ -121,6 +121,7 @@ static void handle_lua_error(void)
 	const char* err = lua_tostring(L, -1);
 	fprintf(stderr, "LUA ERROR: %s\n", err);
 	snprintf(g.lua_error_message, sizeof g.lua_error_message, "%s", err);
+	lua_pop(L, 1);
 }
 
 static void l_load(lua_State* L, const char* path)
@@ -211,6 +212,8 @@ static void lua_stuff(void)
 	if (g.lua_error) {
 		ImGui::TextUnformatted(g.lua_error_message);
 	}
+
+	ImGui::Text("TOP: %d", lua_gettop(L));
 }
 
 void iced_gui(void)
