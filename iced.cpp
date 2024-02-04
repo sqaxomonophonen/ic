@@ -79,10 +79,45 @@ static int l_watch_file(lua_State* L)
 	return 0;
 }
 
+static int l_errhandler(lua_State *L)
+{
+	// "stolen" from `msghandler()` in `lua.c`
+	const char *msg = lua_tostring(L, 1);
+	if (msg == NULL) {
+		if (luaL_callmeta(L, 1, "__tostring") &&  lua_type(L, -1) == LUA_TSTRING) {
+			return 1;
+		}
+	} else {
+		msg = lua_pushfstring(L, "(error object is a %s value)", luaL_typename(L, 1));
+	}
+	luaL_traceback(L, L, msg, 1);
+	return 1;
+}
+
+static int ecall(lua_State *L, int narg, int nres)
+{
+	// "stolen" from `docall()` in `lua.c`
+	int base = lua_gettop(L) - narg;
+	lua_pushcfunction(L, l_errhandler);
+	lua_insert(L, base);
+	int e = lua_pcall(L, narg, nres, base);
+	lua_remove(L, base);
+	return e;
+}
+
+static int edofile(lua_State *L, const char* path)
+{
+	int e;
+	e = luaL_loadfile(L, path);
+	if (e != 0) return e;
+	return ecall(L, 0, LUA_MULTRET);
+}
+
+
 static void handle_lua_error(void)
 {
-	lua_State* L = g.L;
 	g.lua_error = true;
+	lua_State* L = g.L;
 	const char* err = lua_tostring(L, -1);
 	fprintf(stderr, "LUA ERROR: %s\n", err);
 	snprintf(g.lua_error_message, sizeof g.lua_error_message, "%s", err);
@@ -92,7 +127,7 @@ static void l_load(lua_State* L, const char* path)
 {
 	watch_file(path);
 	if (g.lua_error) return;
-	int e = luaL_dofile(L, path);
+	int e = edofile(L, path);
 	if (e != 0) {
 		handle_lua_error();
 		return;
