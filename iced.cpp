@@ -39,6 +39,7 @@ static char* read_file(const char* path, size_t* out_size)
 
 static struct globals {
 	bool lua_error;
+	char lua_error_message[1<<12];
 	lua_State* L;
 	char* watch_paths_arr;
 	struct timespec tt;
@@ -87,6 +88,7 @@ static void l_load(lua_State* L, const char* path)
 		g.lua_error = true;
 		const char* err = lua_tostring(L, -1);
 		fprintf(stderr, "LUA ERROR: %s\n", err);
+		snprintf(g.lua_error_message, sizeof g.lua_error_message, "%s", err);
 		return;
 	}
 }
@@ -148,6 +150,9 @@ void iced_gui(void)
 	if (show_main) {
 		if (ImGui::Begin("Main", &show_main)) {
 			ImGui::Button("TODO");
+			if (g.lua_error) {
+				ImGui::TextUnformatted(g.lua_error_message);
+			}
 		}
 		ImGui::End();
 	}
