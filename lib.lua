@@ -220,10 +220,14 @@ local function mk_view_ctor(dim)
 end
 view2d = mk_view_ctor(2)
 view3d = mk_view_ctor(3)
+local view_run_cache = {}
 function ll_view_run(view)
-	RESET(view.dim)
-	view.ctor()
-	return EMIT()
+	if not view_run_cache[view.name] then
+		RESET(view.dim)
+		view.ctor()
+		view_run_cache[view.name] = EMIT()
+	end
+	return view_run_cache[view.name]
 end
 
 function pop(n)

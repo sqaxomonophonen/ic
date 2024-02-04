@@ -280,11 +280,9 @@ static void window_main(void)
 						const char* name = lua_tostring(L, -1);
 
 						char buf[1<<10];
-						snprintf(buf, sizeof buf, "[%dD] %s##i=%d", dim, name, i);
+						snprintf(buf, sizeof buf, "[%dD] %s##view%d", dim, name, i);
 						lua_pop(L, 1);
-
-						bool do_run = ImGui::Button(buf);
-						if (do_run) {
+						if (ImGui::Button(buf)) {
 							lua_getglobal(L, "ll_view_run");
 							lua_pushvalue(L, -2);
 							int e = ecall(L, 1, 1);
@@ -296,6 +294,7 @@ static void window_main(void)
 								lua_pop(L, 1);
 							}
 						}
+
 						lua_pop(L, 1);
 					}
 				}
