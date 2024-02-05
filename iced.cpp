@@ -201,9 +201,7 @@ static void check_for_reload(void)
 		}
 		p += (n+1);
 	}
-	if (reload) {
-		lua_reload();
-	}
+	if (reload) lua_reload();
 }
 
 void iced_init(void)
@@ -211,28 +209,26 @@ void iced_init(void)
 	lua_reload();
 }
 
-#if 0
-// TODO
 struct view {
-	char* view_id;
+	const char* name;
 	int dim;
-	char* glsl; // XXX? uhhhh... probably don't need to store the source?
-
+	// TODO GL resources...? program? and?
 };
-#endif
 
 struct view_window {
-	const char* view_id; // e.g. "main"
-	const char* window_title; // e.g. "main##1"
+	const char* view_name;
+	const char* window_title;
+	int sequence;
 	gbVec3 origin;
 	float fov;
 	float pitch;
 	float yaw;
 	int width;
 	int height;
-	// TODO GL resources: texture, framebuffer...
+	// TODO GL resources: texture/framebuffer? and?
 };
 
+static struct view* view_arr;
 static struct view_window* view_window_arr;
 
 static bool window_view(struct view_window* w)
@@ -244,11 +240,90 @@ static bool window_view(struct view_window* w)
 	return show;
 }
 
+static void view_window_close(struct view_window* w)
+{
+	free((void*)w->view_name);
+	free((void*)w->window_title);
+	// TODO GL resources
+}
+
 static void lua_api_error(const char* msg)
 {
 	g.lua_error = true;
 	snprintf(g.lua_error_message, sizeof g.lua_error_message, "[API ERROR] %s", msg);
 }
+
+static char* cstrdup(const char* s)
+{
+	const size_t n = strlen(s)+1;
+	char* s2 = (char*)malloc(n);
+	memcpy(s2, s, n);
+	return s2;
+}
+
+static void open_view_window(struct view* view)
+{
+	int sequence = 0;
+	{
+		const int n = arrlen(view_window_arr);
+		for (int i = 0; i < n; i++) {
+			struct view_window* vw2 = &view_window_arr[i];
+			if (vw2->sequence >= sequence && strcmp(vw2->view_name, view->name) == 0) {
+				sequence = vw2->sequence + 1;
+			}
+		}
+	}
+
+	char wt[1<<10];
+	snprintf(wt, sizeof wt, "[%dD] %s /%d", view->dim, view->name, sequence);
+	struct view_window vw = {
+		.view_name = cstrdup(view->name),
+		.window_title = cstrdup(wt),
+		.sequence = sequence,
+	};
+	arrput(view_window_arr, vw);
+}
+
+static void open_view(lua_State* L)
+{
+	lua_getfield(L, -1, "name");
+	const char* name = lua_tostring(L, -1);
+	const int n = arrlen(view_arr);
+	for (int i = 0; i < n; i++) {
+		struct view* view = &view_arr[i];
+		if (strcmp(view->name, name) == 0) {
+			lua_pop(L, 1);
+			open_view_window(view);
+			return;
+		}
+	}
+
+	struct view view = {0};
+	view.name = cstrdup(name);
+	lua_pop(L, 1);
+
+	lua_getfield(L, -1, "dim");
+	view.dim = lua_tointeger(L, -1);
+	lua_pop(L, 1);
+
+	lua_getglobal(L, "ll_view_run");
+	lua_pushvalue(L, -2);
+	int e = ecall(L, 1, 1);
+	if (e != 0) {
+		handle_lua_error();
+		return;
+	}
+
+	const char* glsl_src = lua_tostring(L, -1);
+	// TODO
+
+	lua_pop(L, 1);
+
+	arrput(view_arr, view);
+
+	open_view_window(&view);
+}
+
 
 static void window_main(void)
 {
@@ -278,22 +353,11 @@ static void window_main(void)
 
 						lua_getfield(L, -1, "name");
 						const char* name = lua_tostring(L, -1);
-
 						char buf[1<<10];
 						snprintf(buf, sizeof buf, "[%dD] %s##view%d", dim, name, i);
 						lua_pop(L, 1);
-						if (ImGui::Button(buf)) {
-							lua_getglobal(L, "ll_view_run");
-							lua_pushvalue(L, -2);
-							int e = ecall(L, 1, 1);
-							if (e != 0) {
-								handle_lua_error();
-							} else {
-								const char* src = lua_tostring(L, -1);
-								printf("src=%s\n", src);
-								lua_pop(L, 1);
-							}
-						}
+
+						if (ImGui::Button(buf)) open_view(L);
 
 						lua_pop(L, 1);
 					}
@@ -322,7 +386,9 @@ void iced_gui(void)
 	window_main();
 
 	for (int i = 0; i < arrlen(view_window_arr); i++) {
-		if (!window_view(&view_window_arr[i])) {
+		struct view_window* vw = &view_window_arr[i];
+		if (!window_view(vw)) {
+			view_window_close(vw);
 			arrdel(view_window_arr, i);
 			i--;
 		}

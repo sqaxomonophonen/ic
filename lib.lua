@@ -220,14 +220,10 @@ local function mk_view_ctor(dim)
 end
 view2d = mk_view_ctor(2)
 view3d = mk_view_ctor(3)
-local view_run_cache = {}
 function ll_view_run(view)
-	if not view_run_cache[view.name] then
-		RESET(view.dim)
-		view.ctor()
-		view_run_cache[view.name] = EMIT()
-	end
-	return view_run_cache[view.name]
+	RESET(view.dim)
+	view.ctor()
+	return EMIT()
 end
 
 function pop(n)
@@ -390,6 +386,15 @@ DEF{
 	}
 	]] },
 }
+
+--[[
+TODO affine?
+void gb_mat4_translate(gbMat4 *out, gbVec3 v) {
+	gb_mat4_identity(out);
+	out->col[3].xyz = v;
+	out->col[3].w  = 1;
+}
+]]
 
 DEF{
 	"tx3d:scale",
