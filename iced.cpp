@@ -397,15 +397,17 @@ static bool window_view(struct view_window* w)
 
 		const ImVec2 p0 = ImGui::GetCursorScreenPos();
 		ImVec2 canvas_size = ImGui::GetContentRegionAvail();
-		const ImVec2 p1 = ImVec2(
-			p0.x + canvas_size.x,
-			p0.y + canvas_size.y);
-		ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-		w->canvas_size = canvas_size;
+		if (canvas_size.x > 0 && canvas_size.y > 0) {
+			const ImVec2 p1 = ImVec2(
+				p0.x + canvas_size.x,
+				p0.y + canvas_size.y);
+			ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+			w->canvas_size = canvas_size;
 
-		if (w->gl_initialized) {
-			ImDrawList* draw_list = ImGui::GetWindowDrawList();
-			draw_list->AddImage((void*)(intptr_t)w->texture, p0, p1);
+			if (w->gl_initialized) {
+				ImDrawList* draw_list = ImGui::GetWindowDrawList();
+				draw_list->AddImage((void*)(intptr_t)w->texture, p0, p1);
+			}
 		}
 	}
 	ImGui::End();
