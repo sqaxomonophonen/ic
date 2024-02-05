@@ -398,9 +398,10 @@ static bool window_view(struct view_window* w)
 		const ImVec2 p0 = ImGui::GetCursorScreenPos();
 		ImVec2 canvas_size = ImGui::GetContentRegionAvail();
 		if (canvas_size.x > 0 && canvas_size.y > 0) {
-			const ImVec2 p1 = ImVec2(
-				p0.x + canvas_size.x,
-				p0.y + canvas_size.y);
+			const int px = w->pixel_size+1;
+			const int adjw = (((int)canvas_size.x) / px) * px;
+			const int adjh = (((int)canvas_size.y) / px) * px;
+			const ImVec2 p1 = ImVec2(p0.x + adjw, p0.y + adjh);
 			ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
 			w->canvas_size = canvas_size;
 
@@ -618,7 +619,7 @@ void iced_render(void)
 		if (fb_width != vw->fb_width || fb_height != vw->fb_height) {
 			glBindTexture(GL_TEXTURE_2D, vw->texture); CHKGL;
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); CHKGL;
-			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); CHKGL;
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); CHKGL;
 			glTexImage2D(GL_TEXTURE_2D, /*level=*/0, GL_RGB, fb_width, fb_height, /*border=*/0, GL_RGB, GL_UNSIGNED_BYTE, NULL); CHKGL;
 
 			#if 1
