@@ -176,7 +176,6 @@ static struct globals {
 	struct timespec last_load_time;
 	double duration_load;
 	double duration_call;
-	GLuint blit_prg;
 } g;
 
 static void watch_file(const char* path)
@@ -342,48 +341,6 @@ static void check_for_reload(void)
 void iced_init(void)
 {
 	lua_reload();
-	const char* sources[] = {
-
-		"#version 460\n"
-		"\n"
-		"layout (location = 0) uniform vec2 u_p0;\n"
-		"layout (location = 1) uniform vec2 u_p1;\n"
-		"\n"
-		"out vec2 v_uv;\n"
-		"\n"
-		"void main()\n"
-		"{\n"
-		"	vec2 p;\n"
-		"	if (" IS_Q0 ") {\n"
-		"		p = vec2(u_p0.x, u_p0.y);\n"
-		"		v_uv = vec2(0.0, 0.0);\n"
-		"	} else if (" IS_Q1 ") {\n"
-		"		p = vec2(u_p1.x, u_p0.y);\n"
-		"		v_uv = vec2(1.0, 0.0);\n"
-		"	} else if (" IS_Q2 ") {\n"
-		"		p = vec2(u_p1.x, u_p1.y);\n"
-		"		v_uv = vec2(1.0, 1.0);\n"
-		"	} else if (" IS_Q3 ") {\n"
-		"		p = vec2(u_p0.x, u_p1.y);\n"
-		"		v_uv = vec2(0.0, 1.0);\n"
-		"	}\n"
-		"	gl_Position = vec4(p,0.0,1.0);\n"
-		"}\n"
-		,
-		"#version 460\n"
-		"\n"
-		"in vec2 v_uv;\n"
-		"\n"
-		"layout (location = 2) uniform sampler2D u_tex;\n"
-		"\n"
-		"layout (location = 0) out vec4 frag_color;\n"
-		"\n"
-		"void main()\n"
-		"{\n"
-		"	frag_color = texture(u_tex, v_uv);\n"
-		"}\n"
-	};
-	g.blit_prg = mk_render_program(1,1,sources);
 }
 
 struct view {
@@ -404,9 +361,7 @@ struct view_window {
 	int fb_width, fb_height;
 	GLuint framebuffer;
 	GLuint texture;
-	GLuint vao;
-
-	ImVec2 canvas_pos, canvas_size;
+	ImVec2 canvas_size;
 
 	gbVec3 origin;
 	float fov;
@@ -440,8 +395,18 @@ static bool window_view(struct view_window* w)
 			// TODO new window, same view
 		}
 
-		w->canvas_pos = ImGui::GetCursorScreenPos();
-		w->canvas_size = ImGui::GetContentRegionAvail();
+		const ImVec2 p0 = ImGui::GetCursorScreenPos();
+		ImVec2 canvas_size = ImGui::GetContentRegionAvail();
+		const ImVec2 p1 = ImVec2(
+			p0.x + canvas_size.x,
+			p0.y + canvas_size.y);
+		ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+		w->canvas_size = canvas_size;
+
+		if (w->gl_initialized) {
+			ImDrawList* draw_list = ImGui::GetWindowDrawList();
+			draw_list->AddImage((void*)(intptr_t)w->texture, p0, p1);
+		}
 	}
 	ImGui::End();
 	return show;
@@ -628,13 +593,8 @@ static inline float fremap(float i, float i0, float i1, float o0, float o1)
 
 void iced_render(void)
 {
-	ImGuiIO& io = ImGui::GetIO();
-	const float display_width  = io.DisplaySize.x;
-	const float display_height = io.DisplaySize.y;
-
 	for (int i = 0; i < arrlen(view_window_arr); i++) {
 		struct view_window* vw = &view_window_arr[i];
-		const ImVec2 pos = vw->canvas_pos;
 		const ImVec2 size = vw->canvas_size;
 		const int px = vw->pixel_size+1;
 		const int fb_width = (int)size.x / px;
@@ -645,9 +605,8 @@ void iced_render(void)
 		bool do_render = false; // FIXME true if stuff has otherwise changed
 
 		if (!vw->gl_initialized) {
-			//glGenFramebuffers(1, &vw->framebuffer); CHKGL;
+			glGenFramebuffers(1, &vw->framebuffer); CHKGL;
 			glGenTextures(1, &vw->texture); CHKGL;
-			glGenVertexArrays(1, &vw->vao); CHKGL;
 
 			vw->gl_initialized = true;
 			vw->fb_width = -1;
@@ -701,21 +660,5 @@ void iced_render(void)
 			glBindFramebuffer(GL_FRAMEBUFFER, 0); CHKGL;
 		}
 		#endif
-
-		glUseProgram(g.blit_prg); CHKGL;
-		glBindTexture(GL_TEXTURE_2D, vw->texture); CHKGL;
-		glUniform2f(0,
-			fremap(pos.x, 0, display_width, -1, 1),
-			fremap(pos.y, 0, display_height, 1, -1));
-		glUniform2f(1,
-			fremap(pos.x+size.x, 0, display_width, -1, 1),
-			fremap(pos.y+size.y, 0, display_height, 1, -1));
-		glUniform1i(2,  0);
-		glBindVertexArray(vw->vao); CHKGL;
-		glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
-		glBindVertexArray(0); CHKGL;
-
-		glBindTexture(GL_TEXTURE_2D, 0); CHKGL;
-		glUseProgram(0); CHKGL;
 	}
 }

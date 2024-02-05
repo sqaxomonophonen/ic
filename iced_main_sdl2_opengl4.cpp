@@ -77,13 +77,14 @@ int main(int argc, char** argv)
 
 		ImGui::Render();
 
+		iced_render();
+
 		glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
 		glClearColor(0, 0, 0, 0);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		ImGui_ImplOpenGL4_RenderDrawData(ImGui::GetDrawData());
 
-		iced_render();
 
 		SDL_GL_SwapWindow(window);
 	}
