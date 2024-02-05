@@ -17,7 +17,6 @@ extern "C" {
 #include "iced.h"
 #include "stb_ds.h"
 #include "gb_math.h"
-#include "gl3w.h"
 
 static void check_shader(GLuint shader, GLenum type, int n_sources, const char** sources)
 {
@@ -405,6 +404,7 @@ struct view_window {
 	int fb_width, fb_height;
 	GLuint framebuffer;
 	GLuint texture;
+	GLuint vao;
 
 	ImVec2 canvas_pos, canvas_size;
 
@@ -621,24 +621,35 @@ void iced_gui(void)
 
 }
 
+static inline float fremap(float i, float i0, float i1, float o0, float o1)
+{
+	return o0 + ((i - i0) / (i1 - i0)) * (o1 - o0);
+}
+
 void iced_render(void)
 {
+	ImGuiIO& io = ImGui::GetIO();
+	const float display_width  = io.DisplaySize.x;
+	const float display_height = io.DisplaySize.y;
+
 	for (int i = 0; i < arrlen(view_window_arr); i++) {
 		struct view_window* vw = &view_window_arr[i];
 		const ImVec2 pos = vw->canvas_pos;
 		const ImVec2 size = vw->canvas_size;
-		//printf("TODO RENDER [%f,%f] [%f,%f]\n", pos.x, pos.y, size.x, size.y);
 		const int px = vw->pixel_size+1;
 		const int fb_width = (int)size.x / px;
 		const int fb_height = (int)size.y / px;
 
-		if (fb_width == 0 || fb_height == 0) continue;
+		if (fb_width <= 0 || fb_height <= 0) continue;
 
 		bool do_render = false; // FIXME true if stuff has otherwise changed
 
 		if (!vw->gl_initialized) {
-			glGenFramebuffers(1, &vw->framebuffer); CHKGL;
+			//glGenFramebuffers(1, &vw->framebuffer); CHKGL;
 			glGenTextures(1, &vw->texture); CHKGL;
+			glGenVertexArrays(1, &vw->vao); CHKGL;
+
+			vw->gl_initialized = true;
 			vw->fb_width = -1;
 			vw->fb_height = -1;
 		}
@@ -648,6 +659,31 @@ void iced_render(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); CHKGL;
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); CHKGL;
 			glTexImage2D(GL_TEXTURE_2D, /*level=*/0, GL_RGB, fb_width, fb_height, /*border=*/0, GL_RGB, GL_UNSIGNED_BYTE, NULL); CHKGL;
+
+			#if 1
+			{
+				// upload debug texture
+				const int bpp = 3;
+				const int row_size0 = fb_width * bpp;
+				const int row_size = ((row_size0+3) >> 2) << 2;
+				const int stride = row_size - row_size0;
+				unsigned char* pixels = (unsigned char*)malloc(row_size*fb_height);
+				unsigned char* p = pixels;
+				for (int y = 0; y < fb_height; y++) {
+					for (int x = 0; x < fb_width; x++) {
+						int chk = ((x>>3) ^ (y>>3)) & 1;
+						p[0] = chk ? 255 : 0;
+						p[1] = chk ? 255 : 0;
+						p[2] = chk ?   0 : 255;
+						p += bpp;
+					}
+					p += stride;
+				}
+				glTexSubImage2D(GL_TEXTURE_2D, /*level=*/0, /*xOffset=*/0, /*yOffset=*/0, fb_width, fb_height, GL_RGB, GL_UNSIGNED_BYTE, pixels); CHKGL;
+				free(pixels);
+			}
+			#endif
+
 			glBindTexture(GL_TEXTURE_2D, 0); CHKGL;
 			vw->fb_width = fb_width;
 			vw->fb_height = fb_height;
@@ -666,9 +702,20 @@ void iced_render(void)
 		}
 		#endif
 
-		// TODO uniforms u_p0,u_p1,u_tex
 		glUseProgram(g.blit_prg); CHKGL;
 		glBindTexture(GL_TEXTURE_2D, vw->texture); CHKGL;
+		glUniform2f(0,
+			fremap(pos.x, 0, display_width, -1, 1),
+			fremap(pos.y, 0, display_height, 1, -1));
+		glUniform2f(1,
+			fremap(pos.x+size.x, 0, display_width, -1, 1),
+			fremap(pos.y+size.y, 0, display_height, 1, -1));
+		glUniform1i(2,  0);
+		glBindVertexArray(vw->vao); CHKGL;
 		glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
+		glBindVertexArray(0); CHKGL;
+
+		glBindTexture(GL_TEXTURE_2D, 0); CHKGL;
+		glUseProgram(0); CHKGL;
 	}
 }
