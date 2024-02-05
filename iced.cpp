@@ -19,8 +19,138 @@ extern "C" {
 #include "gb_math.h"
 #include "gl3w.h"
 
-static bool show_window_tree = true;
-static bool show_window_node = true;
+static void check_shader(GLuint shader, GLenum type, int n_sources, const char** sources)
+{
+	GLint status;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+	if (status == GL_TRUE) return;
+
+	GLint msglen;
+	glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &msglen);
+	GLchar* msg = (GLchar*) malloc(msglen + 1);
+	assert(msg != NULL);
+	glGetShaderInfoLog(shader, msglen, NULL, msg);
+	const char* stype =
+		type == GL_COMPUTE_SHADER ? "COMPUTE" :
+		type == GL_VERTEX_SHADER ? "VERTEX" :
+		type == GL_FRAGMENT_SHADER ? "FRAGMENT" :
+		"???";
+
+	// attempt to parse "0:<linenumber>" in error message
+	int error_in_line_number = 0;
+	if (strlen(msg) >= 3 && msg[0] == '0' && msg[1] == ':' && '0' <= msg[2] && msg[2] <= '9') {
+		const char* p0 = msg+2;
+		const char* p1 = p0+1;
+		while ('0' <= *p1 && *p1 <= '9') p1++;
+		char buf[32];
+		const int n = p1-p0;
+		if (n < ARRAY_LENGTH(buf)) {
+			memcpy(buf, p0, n);
+			buf[n] = 0;
+			error_in_line_number = atoi(buf);
+		}
+	}
+
+	fprintf(stderr, "%s GLSL COMPILE ERROR: %s in:\n", stype, msg);
+	if (error_in_line_number > 0) {
+		char line_buffer[1<<14];
+		int line_number = 1;
+		for (int pi = 0; pi < n_sources; pi++) {
+			const char* p = sources[pi];
+			int is_end_of_string = 0;
+			while (!is_end_of_string)  {
+				const char* p0 = p;
+				for (;;) {
+					char ch = *p;
+					if (ch == 0) {
+						is_end_of_string = 1;
+						break;
+					} else if (ch == '\n') {
+						p++;
+						break;
+					} else {
+						p++;
+					}
+				}
+				if (p > p0) {
+					size_t n = (p-1) - p0;
+					if (n >= sizeof(line_buffer)) n = sizeof(line_buffer)-1;
+					memcpy(line_buffer, p0, n);
+					line_buffer[n] = 0;
+					fprintf(stderr, "(%.4d)  %s\n", line_number, line_buffer);
+				}
+				if (line_number == error_in_line_number) {
+					fprintf(stderr, "~^~^~^~ ERROR ~^~^~^~\n");
+				}
+				line_number++;
+			}
+			line_number--;
+		}
+	} else {
+		for (int i = 0; i < n_sources; i++) {
+			fprintf(stderr, "src[%d]: %s\n", i, sources[i]);
+		}
+	}
+	fprintf(stderr, "shader compilation failed\n");
+	abort();
+}
+
+static void check_program(GLint program)
+{
+	GLint status;
+	glGetProgramiv(program, GL_LINK_STATUS, &status);
+	if (status == GL_TRUE) return;
+	GLint msglen;
+	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &msglen);
+	GLchar* msg = (GLchar*) malloc(msglen + 1);
+	glGetProgramInfoLog(program, msglen, NULL, msg);
+	fprintf(stderr, "shader link error: %s", msg);
+	abort();
+}
+
+
+static GLuint mk_shader(GLenum type, int n_sources, const char** sources)
+{
+	GLuint shader = glCreateShader(type); CHKGL;
+	glShaderSource(shader, n_sources, sources, NULL); CHKGL;
+	glCompileShader(shader); CHKGL;
+	check_shader(shader, type, n_sources, sources);
+	return shader;
+}
+
+static GLuint mk_compute_program(int n_sources, const char** sources)
+{
+	GLuint shader = mk_shader(GL_COMPUTE_SHADER, n_sources, sources);
+	GLuint program = glCreateProgram(); CHKGL;
+	glAttachShader(program, shader); CHKGL;
+	glLinkProgram(program); CHKGL;
+	check_program(program);
+
+	// when we have a program the shader is no longer needed
+	glDeleteShader(shader); CHKGL;
+
+	return program;
+}
+
+static GLuint mk_render_program(int n_vertex_sources, int n_fragment_sources, const char** sources)
+{
+	const char** vertex_sources = sources;
+	const char** fragment_sources = sources +  n_vertex_sources;
+	GLuint vertex_shader = mk_shader(GL_VERTEX_SHADER, n_vertex_sources, vertex_sources);
+	GLuint fragment_shader = mk_shader(GL_FRAGMENT_SHADER, n_fragment_sources, fragment_sources);
+	GLuint program = glCreateProgram(); CHKGL;
+	glAttachShader(program, vertex_shader); CHKGL;
+	glAttachShader(program, fragment_shader); CHKGL;
+	glLinkProgram(program); CHKGL;
+	check_program(program);
+
+	// when we have a program the shaders are no longer needed
+	glDeleteShader(vertex_shader); CHKGL;
+	glDeleteShader(fragment_shader); CHKGL;
+
+	return program;
+}
+
 
 #if 0
 static char* read_file(const char* path, size_t* out_size)
@@ -47,6 +177,7 @@ static struct globals {
 	struct timespec last_load_time;
 	double duration_load;
 	double duration_call;
+	GLuint blit_prg;
 } g;
 
 static void watch_file(const char* path)
@@ -204,9 +335,56 @@ static void check_for_reload(void)
 	if (reload) lua_reload();
 }
 
+#define IS_Q0 "(gl_VertexID == 0 || gl_VertexID == 3)"
+#define IS_Q1 "(gl_VertexID == 1)"
+#define IS_Q2 "(gl_VertexID == 2 || gl_VertexID == 4)"
+#define IS_Q3 "(gl_VertexID == 5)"
+
 void iced_init(void)
 {
 	lua_reload();
+	const char* sources[] = {
+
+		"#version 460\n"
+		"\n"
+		"layout (location = 0) uniform vec2 u_p0;\n"
+		"layout (location = 1) uniform vec2 u_p1;\n"
+		"\n"
+		"out vec2 v_uv;\n"
+		"\n"
+		"void main()\n"
+		"{\n"
+		"	vec2 p;\n"
+		"	if (" IS_Q0 ") {\n"
+		"		p = vec2(u_p0.x, u_p0.y);\n"
+		"		v_uv = vec2(0.0, 0.0);\n"
+		"	} else if (" IS_Q1 ") {\n"
+		"		p = vec2(u_p1.x, u_p0.y);\n"
+		"		v_uv = vec2(1.0, 0.0);\n"
+		"	} else if (" IS_Q2 ") {\n"
+		"		p = vec2(u_p1.x, u_p1.y);\n"
+		"		v_uv = vec2(1.0, 1.0);\n"
+		"	} else if (" IS_Q3 ") {\n"
+		"		p = vec2(u_p0.x, u_p1.y);\n"
+		"		v_uv = vec2(0.0, 1.0);\n"
+		"	}\n"
+		"	gl_Position = vec4(p,0.0,1.0);\n"
+		"}\n"
+		,
+		"#version 460\n"
+		"\n"
+		"in vec2 v_uv;\n"
+		"\n"
+		"layout (location = 2) uniform sampler2D u_tex;\n"
+		"\n"
+		"layout (location = 0) out vec4 frag_color;\n"
+		"\n"
+		"void main()\n"
+		"{\n"
+		"	frag_color = texture(u_tex, v_uv);\n"
+		"}\n"
+	};
+	g.blit_prg = mk_render_program(1,1,sources);
 }
 
 struct view {
@@ -219,6 +397,17 @@ struct view_window {
 	const char* view_name;
 	const char* window_title;
 	int sequence;
+
+	bool autoload;
+	int pixel_size;
+
+	bool gl_initialized;
+	int fb_width, fb_height;
+	GLuint framebuffer;
+	GLuint texture;
+
+	ImVec2 canvas_pos, canvas_size;
+
 	gbVec3 origin;
 	float fov;
 	float pitch;
@@ -235,6 +424,24 @@ static bool window_view(struct view_window* w)
 {
 	bool show = true;
 	if (ImGui::Begin(w->window_title, &show)) {
+		if (ImGui::Button("Fly")) {
+			// TODO wasd+mlock flymode
+		}
+
+		ImGui::SameLine();
+		ImGui::Checkbox("Autoload", &w->autoload);
+
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(70);
+		ImGui::Combo("Px", &w->pixel_size, "1x" "\x0" "2x" "\x0" "3x" "\x0" "4x" "\x0\x0");
+
+		ImGui::SameLine();
+		if (ImGui::Button("Clone")) {
+			// TODO new window, same view
+		}
+
+		w->canvas_pos = ImGui::GetCursorScreenPos();
+		w->canvas_size = ImGui::GetContentRegionAvail();
 	}
 	ImGui::End();
 	return show;
@@ -280,6 +487,7 @@ static void open_view_window(struct view* view)
 		.view_name = cstrdup(view->name),
 		.window_title = cstrdup(wt),
 		.sequence = sequence,
+		.autoload = true,
 	};
 	arrput(view_window_arr, vw);
 }
@@ -379,8 +587,6 @@ static void window_main(void)
 						}
 						lua_pop(L, 1);
 
-						//if (i >= 2) ImGui::SameLine();
-
 						lua_getfield(L, -1, "name");
 						const char* name = lua_tostring(L, -1);
 						char buf[1<<10];
@@ -413,4 +619,56 @@ void iced_gui(void)
 		}
 	}
 
+}
+
+void iced_render(void)
+{
+	for (int i = 0; i < arrlen(view_window_arr); i++) {
+		struct view_window* vw = &view_window_arr[i];
+		const ImVec2 pos = vw->canvas_pos;
+		const ImVec2 size = vw->canvas_size;
+		//printf("TODO RENDER [%f,%f] [%f,%f]\n", pos.x, pos.y, size.x, size.y);
+		const int px = vw->pixel_size+1;
+		const int fb_width = (int)size.x / px;
+		const int fb_height = (int)size.y / px;
+
+		if (fb_width == 0 || fb_height == 0) continue;
+
+		bool do_render = false; // FIXME true if stuff has otherwise changed
+
+		if (!vw->gl_initialized) {
+			glGenFramebuffers(1, &vw->framebuffer); CHKGL;
+			glGenTextures(1, &vw->texture); CHKGL;
+			vw->fb_width = -1;
+			vw->fb_height = -1;
+		}
+
+		if (fb_width != vw->fb_width || fb_height != vw->fb_height) {
+			glBindTexture(GL_TEXTURE_2D, vw->texture); CHKGL;
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); CHKGL;
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); CHKGL;
+			glTexImage2D(GL_TEXTURE_2D, /*level=*/0, GL_RGB, fb_width, fb_height, /*border=*/0, GL_RGB, GL_UNSIGNED_BYTE, NULL); CHKGL;
+			glBindTexture(GL_TEXTURE_2D, 0); CHKGL;
+			vw->fb_width = fb_width;
+			vw->fb_height = fb_height;
+			do_render = true;
+		}
+
+		#if 0
+		if (do_render) {
+			glBindFramebuffer(GL_FRAMEBUFFER, vw->framebuffer); CHKGL;
+			glViewport(0, 0, fb_width, fb_height);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, vw->texture, /*level=*/0); CHKGL;
+			assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+
+			//glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
+			glBindFramebuffer(GL_FRAMEBUFFER, 0); CHKGL;
+		}
+		#endif
+
+		// TODO uniforms u_p0,u_p1,u_tex
+		glUseProgram(g.blit_prg); CHKGL;
+		glBindTexture(GL_TEXTURE_2D, vw->texture); CHKGL;
+		glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
+	}
 }
