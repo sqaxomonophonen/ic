@@ -10,6 +10,8 @@ view3d("main", function()
 	end
 end)
 
+header("primitives")
+
 view3d("sphere", function()
 	sdf3d:sphere(1)
 end)

@@ -220,6 +220,11 @@ local function mk_view_ctor(dim)
 end
 view2d = mk_view_ctor(2)
 view3d = mk_view_ctor(3)
+
+function header(title)
+	table.insert(ll_views, {header=title})
+end
+
 function ll_view_run(view)
 	RESET(view.dim)
 	view.ctor()

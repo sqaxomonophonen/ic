@@ -331,14 +331,45 @@ static void window_main(void)
 	if (show_main) {
 		if (ImGui::Begin("Main", &show_main)) {
 			lua_State* L = g.L;
+
+			if (g.lua_error) {
+				ImGui::SeparatorText("Lua Error");
+				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.lua_error_message);
+			}
+
+			ImGui::SeparatorText("Status");
+			ImGui::Text("Load: %fs\nCall: %fs\nStack: %d",
+				g.duration_load,
+				g.duration_call,
+				lua_gettop(L));
+
+
 			if (L != NULL && !g.lua_error) {
 				lua_getglobal(L, "ll_views");
 				if (!lua_istable(L, -1)) {
 					lua_api_error("no global table named \"ll_views\"");
 				} else {
 					unsigned n = lua_rawlen(L, -1);
+					bool show = true;
 					for (unsigned i = 1; i <= n; i++) {
+						if (i == 1) ImGui::SeparatorText("Views");
+
 						lua_rawgeti(L, -1, i);
+
+						lua_getfield(L, -1, "header");
+						if (!lua_isnil(L, -1)) {
+							const char* header = lua_tostring(L, -1);
+							show = ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_None);
+							lua_pop(L, 2);
+							continue;
+						} else {
+							lua_pop(L, 1);
+						}
+
+						if (!show) {
+							lua_pop(L, 1);
+							continue;
+						}
 
 						lua_getfield(L, -1, "dim");
 						const int dim = lua_tointeger(L, -1);
@@ -348,8 +379,7 @@ static void window_main(void)
 						}
 						lua_pop(L, 1);
 
-						if (i == 1) ImGui::SeparatorText("Views");
-						if (i >= 2) ImGui::SameLine();
+						//if (i >= 2) ImGui::SameLine();
 
 						lua_getfield(L, -1, "name");
 						const char* name = lua_tostring(L, -1);
@@ -364,17 +394,6 @@ static void window_main(void)
 				}
 				lua_pop(L, 1);
 			}
-
-			if (g.lua_error) {
-				ImGui::SeparatorText("Lua Error");
-				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.lua_error_message);
-			}
-
-			ImGui::SeparatorText("Status");
-			ImGui::Text("Load: %fs / Call: %fs / Stack: %d",
-				g.duration_load,
-				g.duration_call,
-				lua_gettop(L));
 		}
 		ImGui::End();
 	}
