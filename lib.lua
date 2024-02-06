@@ -352,23 +352,32 @@ function DEF(def)
 			rjoin(top, {dvar=dn})
 		end
 
-		local stack0 = #ST.stack
-
 		if not is_leaf then
 			stackpush(D1, p, def, glsl_argstr)
 		end
 
 		return setmetatable({
+			stack0 = #ST.stack,
 		}, {
 			__close = function(self)
-				local stack1 = #ST.stack
-				local n = stack1 - stack0
+				local n = #ST.stack - self.stack0
 				assert(n > 0, string.format("closer expected request to pop at least 1 element; got %d", n))
 				pop(n)
 			end,
 		})
 	end
 end
+
+DEF{
+	"sdf2d:circle",
+	argfmt = "1",
+	glsl = { map = [[
+	float $(vec2 p, float r)
+	{
+		return length(p)-r;
+	}
+	]] },
+}
 
 DEF{
 	"sdf3d:sphere",
@@ -390,16 +399,8 @@ DEF{
 		return p+r;
 	}
 	]] },
+	affine = function(v) return {"t3",v} end,
 }
-
---[[
-TODO affine?
-void gb_mat4_translate(gbMat4 *out, gbVec3 v) {
-	gb_mat4_identity(out);
-	out->col[3].xyz = v;
-	out->col[3].w  = 1;
-}
-]]
 
 DEF{
 	"tx3d:scale",
@@ -418,6 +419,7 @@ DEF{
 		}
 	]],
 	},
+	affine = function(s) return {"s3",s} end,
 }
 
 DEF{
@@ -440,12 +442,12 @@ DEF{
 			return min(d0, d1);
 		}
 		]],
-		d2m21 = [[
-		MAT $(float d0, float d1, MAT m0, MAT m1)
-		{
-			return d0 < d1 ? m0 : m1;
-		}
-		]],
+		--  d2m21 = [[
+		--  MAT $(float d0, float d1, MAT m0, MAT m1)
+		--  {
+		--  	return d0 < d1 ? m0 : m1;
+		--  }
+		--  ]],
 	},
 }
 

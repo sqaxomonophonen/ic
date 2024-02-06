@@ -18,11 +18,19 @@ extern "C" {
 #include "stb_ds.h"
 #include "gb_math.h"
 
+bool has_glsl_error;
+static char glsl_error[1<<13];
+
 static void check_shader(GLuint shader, GLenum type, int n_sources, const char** sources)
 {
 	GLint status;
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
-	if (status == GL_TRUE) return;
+	if (status == GL_TRUE) {
+		has_glsl_error = false;
+		return;
+	}
+
+	has_glsl_error = true;
 
 	GLint msglen;
 	glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &msglen);
@@ -50,7 +58,10 @@ static void check_shader(GLuint shader, GLenum type, int n_sources, const char**
 		}
 	}
 
-	fprintf(stderr, "%s GLSL COMPILE ERROR: %s in:\n", stype, msg);
+	char* pe = glsl_error;
+	char* pe1 = glsl_error + sizeof glsl_error;
+
+	pe += snprintf(pe, pe1-pe, "%s GLSL COMPILE ERROR: %s in:\n", stype, msg);
 	if (error_in_line_number > 0) {
 		char line_buffer[1<<14];
 		int line_number = 1;
@@ -76,10 +87,10 @@ static void check_shader(GLuint shader, GLenum type, int n_sources, const char**
 					if (n >= sizeof(line_buffer)) n = sizeof(line_buffer)-1;
 					memcpy(line_buffer, p0, n);
 					line_buffer[n] = 0;
-					fprintf(stderr, "(%.4d)  %s\n", line_number, line_buffer);
+					pe += snprintf(pe, pe1-pe, "(%.4d)  %s\n", line_number, line_buffer);
 				}
 				if (line_number == error_in_line_number) {
-					fprintf(stderr, "~^~^~^~ ERROR ~^~^~^~\n");
+					pe += snprintf(pe, pe1-pe, "~^~^~^~ ERROR ~^~^~^~\n");
 				}
 				line_number++;
 			}
@@ -87,24 +98,26 @@ static void check_shader(GLuint shader, GLenum type, int n_sources, const char**
 		}
 	} else {
 		for (int i = 0; i < n_sources; i++) {
-			fprintf(stderr, "src[%d]: %s\n", i, sources[i]);
+			pe += snprintf(pe, pe1-pe, "src[%d]: %s\n", i, sources[i]);
 		}
 	}
-	fprintf(stderr, "shader compilation failed\n");
-	abort();
+	pe += snprintf(pe, pe1-pe, "shader compilation failed\n");
 }
 
 static void check_program(GLint program)
 {
 	GLint status;
 	glGetProgramiv(program, GL_LINK_STATUS, &status);
-	if (status == GL_TRUE) return;
+	if (status == GL_TRUE) {
+		has_glsl_error = false;
+		return;
+	}
+	has_glsl_error = true;
 	GLint msglen;
 	glGetProgramiv(program, GL_INFO_LOG_LENGTH, &msglen);
 	GLchar* msg = (GLchar*) malloc(msglen + 1);
 	glGetProgramInfoLog(program, msglen, NULL, msg);
-	fprintf(stderr, "shader link error: %s", msg);
-	abort();
+	snprintf(glsl_error, sizeof glsl_error, "shader link error: %s", msg);
 }
 
 
@@ -120,6 +133,10 @@ static GLuint mk_shader(GLenum type, int n_sources, const char** sources)
 static GLuint mk_compute_program(int n_sources, const char** sources)
 {
 	GLuint shader = mk_shader(GL_COMPUTE_SHADER, n_sources, sources);
+	if (has_glsl_error) {
+		glDeleteShader(shader); CHKGL;
+		return 0;
+	}
 	GLuint program = glCreateProgram(); CHKGL;
 	glAttachShader(program, shader); CHKGL;
 	glLinkProgram(program); CHKGL;
@@ -136,7 +153,16 @@ static GLuint mk_render_program(int n_vertex_sources, int n_fragment_sources, co
 	const char** vertex_sources = sources;
 	const char** fragment_sources = sources +  n_vertex_sources;
 	GLuint vertex_shader = mk_shader(GL_VERTEX_SHADER, n_vertex_sources, vertex_sources);
+	if (has_glsl_error) {
+		glDeleteShader(vertex_shader); CHKGL;
+		return 0;
+	}
 	GLuint fragment_shader = mk_shader(GL_FRAGMENT_SHADER, n_fragment_sources, fragment_sources);
+	if (has_glsl_error) {
+		glDeleteShader(vertex_shader); CHKGL;
+		glDeleteShader(fragment_shader); CHKGL;
+		return 0;
+	}
 	GLuint program = glCreateProgram(); CHKGL;
 	glAttachShader(program, vertex_shader); CHKGL;
 	glAttachShader(program, fragment_shader); CHKGL;
@@ -169,13 +195,14 @@ static char* read_file(const char* path, size_t* out_size)
 #endif
 
 static struct globals {
-	bool lua_error;
-	char lua_error_message[1<<12];
+	bool has_error;
+	char error_message[1<<14];
 	lua_State* L;
 	char* watch_paths_arr;
 	struct timespec last_load_time;
 	double duration_load;
 	double duration_call;
+	GLuint vao0;
 } g;
 
 static void watch_file(const char* path)
@@ -214,15 +241,7 @@ static int lc_watch_file(lua_State* L)
 
 static int l_errhandler(lua_State *L)
 {
-	// "stolen" from `msghandler()` in `lua.c`
-	const char *msg = lua_tostring(L, 1);
-	if (msg == NULL) {
-		if (luaL_callmeta(L, 1, "__tostring") &&  lua_type(L, -1) == LUA_TSTRING) {
-			return 1;
-		}
-	} else {
-		msg = lua_pushfstring(L, "(error object is a %s value)", luaL_typename(L, 1));
-	}
+	const char* msg = lua_tostring(L, 1);
 	luaL_traceback(L, L, msg, 1);
 	return 1;
 }
@@ -270,18 +289,18 @@ static int edofile(lua_State *L, const char* path)
 
 static void handle_lua_error(void)
 {
-	g.lua_error = true;
+	g.has_error = true;
 	lua_State* L = g.L;
 	const char* err = lua_tostring(L, -1);
 	fprintf(stderr, "LUA ERROR: %s\n", err);
-	snprintf(g.lua_error_message, sizeof g.lua_error_message, "%s", err);
+	snprintf(g.error_message, sizeof g.error_message, "[LUA ERROR] %s", err);
 	lua_pop(L, 1);
 }
 
 static void l_load(lua_State* L, const char* path)
 {
 	watch_file(path);
-	if (g.lua_error) return;
+	if (g.has_error) return;
 	int e = edofile(L, path);
 	if (e != 0) {
 		handle_lua_error();
@@ -298,7 +317,7 @@ static void lua_reload(void)
 		lua_close(g.L);
 		g.L = NULL;
 	}
-	g.lua_error = false;
+	g.has_error = false;
 	arrsetlen(g.watch_paths_arr, 0);
 	g.duration_load = 0;
 	g.duration_call = 0;
@@ -341,11 +360,13 @@ static void check_for_reload(void)
 void iced_init(void)
 {
 	lua_reload();
+	glGenVertexArrays(1, &g.vao0); CHKGL;
 }
 
 struct view {
 	const char* name;
 	int dim;
+	GLuint prg0;
 	// TODO GL resources...? program? and?
 };
 
@@ -424,8 +445,8 @@ static void view_window_close(struct view_window* w)
 
 static void lua_api_error(const char* msg)
 {
-	g.lua_error = true;
-	snprintf(g.lua_error_message, sizeof g.lua_error_message, "[API ERROR] %s", msg);
+	g.has_error = true;
+	snprintf(g.error_message, sizeof g.error_message, "[API ERROR] %s", msg);
 }
 
 static char* cstrdup(const char* s)
@@ -491,13 +512,73 @@ static void open_view(lua_State* L)
 	}
 
 	const char* glsl_src = lua_tostring(L, -1);
-	// TODO
+	if (view.dim == 2) {
+		const char* sources[] = {
+
+			"#version 460\n"
+			"\n"
+			"layout (location = 0) uniform vec2 u_p0;\n"
+			"layout (location = 1) uniform vec2 u_p1;\n"
+			"\n"
+			"out vec2 v_pos;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	vec2 c;\n"
+			"	if (" IS_Q0 ") {\n"
+			"		c = vec2(-1.0, -1.0);\n"
+			"		v_pos = vec2(u_p0.x, u_p0.y);\n"
+			"	} else if (" IS_Q1 ") {\n"
+			"		c = vec2( 1.0, -1.0);\n"
+			"		v_pos = vec2(u_p1.x, u_p0.y);\n"
+			"	} else if (" IS_Q2 ") {\n"
+			"		c = vec2( 1.0,  1.0);\n"
+			"		v_pos = vec2(u_p1.x, u_p1.y);\n"
+			"	} else if (" IS_Q3 ") {\n"
+			"		c = vec2(-1.0,  1.0);\n"
+			"		v_pos = vec2(u_p0.x, u_p1.y);\n"
+			"	}\n"
+			"	gl_Position = vec4(c,0.0,1.0);\n"
+			"}\n"
+			,
+
+			"#version 460\n"
+			"\n"
+			,
+			glsl_src
+			,
+
+			"\n"
+			"in vec2 v_pos;\n"
+			"\n"
+			"layout (location = 0) out vec4 frag_color;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	float d = map(v_pos);\n"
+			"	float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;\n"
+			"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2, 0.3, 0.4);\n"
+			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
+			"	c += pow(cos(d*3.0), 20.0) * a0;\n"
+			"	frag_color = vec4(m*c, 1.0);\n"
+			"}\n"
+		};
+
+		view.prg0 = mk_render_program(1, 3, sources);
+		if (has_glsl_error) {
+			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
+			g.has_error = true;
+		}
+	} else if (view.dim == 3) {
+		assert(!"TODO 3D"); // XXX
+	}
 
 	lua_pop(L, 1);
 
-	arrput(view_arr, view);
-
-	open_view_window(&view);
+	if (!g.has_error) {
+		arrput(view_arr, view);
+		open_view_window(&view);
+	}
 }
 
 
@@ -508,9 +589,9 @@ static void window_main(void)
 		if (ImGui::Begin("Main", &show_main)) {
 			lua_State* L = g.L;
 
-			if (g.lua_error) {
-				ImGui::SeparatorText("Lua Error");
-				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.lua_error_message);
+			if (g.has_error) {
+				ImGui::SeparatorText("Error");
+				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.error_message);
 			}
 
 			ImGui::SeparatorText("Status");
@@ -519,8 +600,7 @@ static void window_main(void)
 				g.duration_call,
 				lua_gettop(L));
 
-
-			if (L != NULL && !g.lua_error) {
+			if (L != NULL) {
 				lua_getglobal(L, "ll_views");
 				if (!lua_istable(L, -1)) {
 					lua_api_error("no global table named \"ll_views\"");
@@ -596,8 +676,22 @@ static inline float fremap(float i, float i0, float i1, float o0, float o1)
 
 void iced_render(void)
 {
-	for (int i = 0; i < arrlen(view_window_arr); i++) {
-		struct view_window* vw = &view_window_arr[i];
+	const int n0 = arrlen(view_window_arr);
+	const int n1 = arrlen(view_arr);
+
+	for (int i0 = 0; i0 < n0; i0++) {
+		struct view_window* vw = &view_window_arr[i0];
+
+		struct view* view = NULL;
+		for (int i1 = 0; i1 < n1; i1++) {
+			struct view* v2 = &view_arr[i1];
+			if (strcmp(v2->name, vw->view_name) == 0) {
+				view = v2;
+				break;
+			}
+		}
+		assert((view != NULL) && "no view?!");
+
 		const ImVec2 size = vw->canvas_size;
 		const int px = vw->pixel_size+1;
 		const int fb_width = (int)size.x / px;
@@ -652,16 +746,21 @@ void iced_render(void)
 			do_render = true;
 		}
 
-		#if 0
 		if (do_render) {
 			glBindFramebuffer(GL_FRAMEBUFFER, vw->framebuffer); CHKGL;
 			glViewport(0, 0, fb_width, fb_height);
 			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, vw->texture, /*level=*/0); CHKGL;
 			assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
 
-			//glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
+			glUseProgram(view->prg0); CHKGL;
+			glUniform2f(0, -10, -10);
+			glUniform2f(1,  10,  10);
+
+			glBindVertexArray(g.vao0); CHKGL;
+			glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
+			glBindVertexArray(0); CHKGL;
+
 			glBindFramebuffer(GL_FRAMEBUFFER, 0); CHKGL;
 		}
-		#endif
 	}
 }

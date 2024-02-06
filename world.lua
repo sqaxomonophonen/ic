@@ -1,3 +1,10 @@
+
+--[[
+material("m0", {
+	albedo = {1, 0.5, 0.2},
+})
+]]
+
 view3d("main", function()
 	do
 		local _ <close> = tx3d:translate{1,2,3} tx3d:translate{1.1,2.2,3.3} d11:round(0.1)
@@ -8,6 +15,10 @@ view3d("main", function()
 			tx3d:translate{10,0,0} sdf3d:sphere(3) pop()
 		end
 	end
+end)
+
+view2d("shape", function()
+	sdf2d:circle(3)
 end)
 
 header("primitives")
