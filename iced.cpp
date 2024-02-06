@@ -627,6 +627,12 @@ static void view_window_free(struct view_window* vw)
 	free((void*)vw->window_title);
 }
 
+static void view_free(struct view* v)
+{
+	glDeleteProgram(v->prg0);
+	free((void*)v->name);
+}
+
 static void lua_api_error(const char* msg)
 {
 	g.has_error = true;
@@ -769,12 +775,34 @@ static void window_main(void)
 
 void iced_gui(void)
 {
-	for (int i = 0; i < arrlen(view_window_arr); i++) {
-		struct view_window* vw = &view_window_arr[i];
+	for (int i0 = 0; i0 < arrlen(view_window_arr); i0++) {
+		struct view_window* vw = &view_window_arr[i0];
 		if (vw->dispose) {
+			bool also_dispose_view = true;
+			for (int i1 = 0; i1 < arrlen(view_window_arr); i1++) {
+				if (i1 == i0) continue;
+				struct view_window* vw1 = &view_window_arr[i1];
+				if (strcmp(vw1->view_name, vw->view_name) == 0) {
+					also_dispose_view = false;
+					break;
+				}
+			}
+			if (also_dispose_view) {
+				bool disposed_view = false;
+				for (int i1 = 0; i1 < arrlen(view_arr); i1++) {
+					struct view* v = &view_arr[i1];
+					if (strcmp(v->name, vw->view_name) == 0) {
+						view_free(v);
+						arrdel(view_arr, i1);
+						disposed_view = true;
+						break;
+					}
+				}
+				assert(disposed_view);
+			}
 			view_window_free(vw);
-			arrdel(view_window_arr, i);
-			i--;
+			arrdel(view_window_arr, i0);
+			i0--;
 		}
 	}
 	check_for_reload();
