@@ -334,7 +334,6 @@ struct view_window {
 	const char* window_title;
 	int sequence;
 
-	bool autoload;
 	int pixel_size;
 
 	bool gl_initialized;
@@ -511,9 +510,6 @@ static bool window_view(struct view_window* w)
 		}
 
 		ImGui::SameLine();
-		ImGui::Checkbox("Autoload", &w->autoload);
-
-		ImGui::SameLine();
 		ImGui::SetNextItemWidth(70);
 		ImGui::Combo("Px", &w->pixel_size, "1x" "\x0" "2x" "\x0" "3x" "\x0" "4x" "\x0\x0");
 
@@ -582,7 +578,6 @@ static void open_view_window(struct view* view)
 		.view_name = cstrdup(view->name),
 		.window_title = cstrdup(wt),
 		.sequence = sequence,
-		.autoload = true,
 	};
 	arrput(view_window_arr, vw);
 }
