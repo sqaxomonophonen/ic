@@ -19,10 +19,11 @@ end)
 
 view2d("shape", function()
 	sdf2d:circle(3)
-	tx2d:translate{5,0} sdf2d:circle(2) pop()
-	tx2d:translate{-5,0} sdf2d:circle(2) pop()
-	tx2d:translate{8,0} sdf2d:circle(1) pop()
-	tx2d:translate{-8,0} sdf2d:circle(1) pop()
+	local x = 1.5
+	tx2d:translate{5,3} sdf2d:circle(2) pop()
+	tx2d:translate{-5,-3} sdf2d:circle(2) pop()
+	tx2d:translate{8,0} sdf2d:circle(x) pop()
+	tx2d:translate{-8,0} sdf2d:circle(x) pop()
 end)
 
 header("primitives")

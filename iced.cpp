@@ -14,6 +14,7 @@ extern "C" {
 }
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "util.h"
 #include "iced.h"
 #include "stb_ds.h"
@@ -326,7 +327,6 @@ struct view {
 	int dim;
 	GLuint prg0;
 	uint64_t serial;
-	// TODO GL resources...? program? and?
 };
 
 struct view_window {
@@ -345,13 +345,20 @@ struct view_window {
 	uint64_t serial;
 	uint64_t seen_serial;
 
-	gbVec3 origin;
-	float fov;
-	float pitch;
-	float yaw;
-	int width;
-	int height;
-	// TODO GL resources: texture/framebuffer? and?
+	ImVec2 last_mousepos;
+
+	struct {
+		gbVec2 origin;
+		float scale;
+		bool is_panning;
+	} d2;
+
+	struct {
+		gbVec3 origin;
+		float fov;
+		float pitch;
+		float yaw;
+	} d3;
 };
 
 static struct view* view_arr;
@@ -501,17 +508,35 @@ void iced_init(void)
 	glGenVertexArrays(1, &g.vao0); CHKGL;
 }
 
-static bool window_view(struct view_window* w)
+static struct view* get_view_window_view(struct view_window* vw)
 {
+	const int n = arrlen(view_arr);
+	for (int i = 0; i < n; i++) {
+		struct view* view = &view_arr[i];
+		if (strcmp(view->name, vw->view_name) == 0) {
+			return view;
+		}
+	}
+	assert(!"no view?!");
+}
+
+static bool window_view(struct view_window* vw)
+{
+	struct view* view = get_view_window_view(vw);
+	ImGuiIO& io = ImGui::GetIO();
 	bool show = true;
-	if (ImGui::Begin(w->window_title, &show)) {
-		if (ImGui::Button("Fly")) {
-			// TODO wasd+mlock flymode
+	if (ImGui::Begin(vw->window_title, &show)) {
+		const int dim = view->dim;
+
+		if (dim == 3) {
+			if (ImGui::Button("Fly")) {
+				// TODO wasd+mlock flymode
+			}
+			ImGui::SameLine();
 		}
 
-		ImGui::SameLine();
 		ImGui::SetNextItemWidth(70);
-		ImGui::Combo("Px", &w->pixel_size, "1x" "\x0" "2x" "\x0" "3x" "\x0" "4x" "\x0\x0");
+		ImGui::Combo("Px", &vw->pixel_size, "1x" "\x0" "2x" "\x0" "3x" "\x0" "4x" "\x0\x0");
 
 		ImGui::SameLine();
 		if (ImGui::Button("Clone")) {
@@ -519,18 +544,60 @@ static bool window_view(struct view_window* w)
 		}
 
 		const ImVec2 p0 = ImGui::GetCursorScreenPos();
-		ImVec2 canvas_size = ImGui::GetContentRegionAvail();
+		const ImVec2 canvas_size = ImGui::GetContentRegionAvail();
 		if (canvas_size.x > 0 && canvas_size.y > 0) {
-			const int px = w->pixel_size+1;
+			vw->canvas_size = canvas_size;
+			const int px = vw->pixel_size+1;
 			const int adjw = (((int)canvas_size.x) / px) * px;
 			const int adjh = (((int)canvas_size.y) / px) * px;
 			const ImVec2 p1 = ImVec2(p0.x + adjw, p0.y + adjh);
 			ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-			w->canvas_size = canvas_size;
+			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
+			//const bool is_drag = ImGui::IsItemActive();
+			const bool is_hover = ImGui::IsItemHovered();
+			//const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
+			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
+			//const bool doubleclick_rmb = is_hover && ImGui::IsMouseDoubleClicked(1);
+			const float mw = io.MouseWheel;
+			const ImVec2 mousepos = io.MousePos;
 
-			if (w->gl_initialized) {
+			if (dim == 2) {
+				if (click_rmb) {
+					vw->d2.is_panning = true;
+					vw->last_mousepos = mousepos;
+				}
+
+				if (vw->d2.is_panning) {
+					float dx = mousepos.x - vw->last_mousepos.x;
+					float dy = mousepos.y - vw->last_mousepos.y;
+					if (dx != 0 || dy != 0) {
+						const float s = vw->d2.scale;
+						vw->d2.origin.x -= dx*s;
+						vw->d2.origin.y -= dy*s;
+						vw->serial = next_serial();
+					}
+
+					vw->last_mousepos = mousepos;
+					if (ImGui::IsMouseReleased(1)) {
+						vw->d2.is_panning = false;
+					}
+				}
+
+				if (is_hover && mw != 0) {
+					const float sc0 = vw->d2.scale;
+					vw->d2.scale *= powf(1.02f, -mw);
+					const float sc1 = vw->d2.scale;
+					const float mx = mousepos.x - (p0.x + canvas_size.x * 0.5f);
+					const float my = mousepos.y - (p0.y + canvas_size.y * 0.5f);
+					vw->d2.origin.x += (mx * sc0) - (mx * sc1);
+					vw->d2.origin.y += (my * sc0) - (my * sc1);
+					vw->serial = next_serial();
+				}
+			}
+
+			if (vw->gl_initialized) {
 				ImDrawList* draw_list = ImGui::GetWindowDrawList();
-				draw_list->AddImage((void*)(intptr_t)w->texture, p0, p1);
+				draw_list->AddImage((void*)(intptr_t)vw->texture, p0, p1);
 			}
 		}
 	}
@@ -578,6 +645,7 @@ static void open_view_window(struct view* view)
 		.view_name = cstrdup(view->name),
 		.window_title = cstrdup(wt),
 		.sequence = sequence,
+		.d2 = { .scale = 0.03, },
 	};
 	arrput(view_window_arr, vw);
 }
@@ -707,21 +775,11 @@ static inline float fremap(float i, float i0, float i1, float o0, float o1)
 
 void iced_render(void)
 {
-	const int n0 = arrlen(view_window_arr);
-	const int n1 = arrlen(view_arr);
+	const int n = arrlen(view_window_arr);
+	for (int i = 0; i < n; i++) {
+		struct view_window* vw = &view_window_arr[i];
 
-	for (int i0 = 0; i0 < n0; i0++) {
-		struct view_window* vw = &view_window_arr[i0];
-
-		struct view* view = NULL;
-		for (int i1 = 0; i1 < n1; i1++) {
-			struct view* v2 = &view_arr[i1];
-			if (strcmp(v2->name, vw->view_name) == 0) {
-				view = v2;
-				break;
-			}
-		}
-		assert((view != NULL) && "no view?!");
+		struct view* view = get_view_window_view(vw);
 
 		const ImVec2 size = vw->canvas_size;
 		const int px = vw->pixel_size+1;
@@ -750,7 +808,7 @@ void iced_render(void)
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); CHKGL;
 			glTexImage2D(GL_TEXTURE_2D, /*level=*/0, GL_RGB, fb_width, fb_height, /*border=*/0, GL_RGB, GL_UNSIGNED_BYTE, NULL); CHKGL;
 
-			#if 1
+			#if 0
 			{
 				// upload debug texture
 				const int bpp = 3;
@@ -787,8 +845,22 @@ void iced_render(void)
 			assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
 
 			glUseProgram(view->prg0); CHKGL;
-			glUniform2f(0, -10, -10);
-			glUniform2f(1,  10,  10);
+			if (view->dim == 2) {
+				const gbVec2 o = vw->d2.origin;
+				const float sc = vw->d2.scale * (float)px;
+				const float dx = (float)fb_width * sc;
+				const float dy = (float)fb_height * sc;
+				const float x0 = o.x - dx*0.5;
+				const float y0 = o.y - dy*0.5;
+				const float x1 = o.x + dx*0.5;
+				const float y1 = o.y + dy*0.5;
+				glUniform2f(0, x0, y0);
+				glUniform2f(1, x1, y1);
+			} else if (view->dim == 3) {
+				assert(!"TODO dim=3");
+			} else {
+				assert(!"bad");
+			}
 
 			glBindVertexArray(g.vao0); CHKGL;
 			glDrawArrays(GL_TRIANGLES, 0, 6); CHKGL;
