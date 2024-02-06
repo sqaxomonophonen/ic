@@ -261,6 +261,11 @@ function endchain()
 	error("TODO") -- TODO
 end
 
+local function callsite()
+	local info = debug.getinfo(3, 'lS')
+	return string.sub(info.source, 2) .. ":" .. info.currentline
+end
+
 function DEF(def)
 	local name = def[1]
 	defmap[name] = def
@@ -284,6 +289,7 @@ function DEF(def)
 	local index = getmetatable(nodeclass).__index
 	assert(index[name1] == nil, "redefinition of " .. name)
 	index[name1] = function(self, ...)
+		-- local c = callsite() -- e.g. world.lua:25
 		local args = {...}
 		assert(#args == #argfmt, "expected " .. #argfmt .. " argument(s) for " .. name .. "() but got " .. #args)
 		local g = ST.mapgen
