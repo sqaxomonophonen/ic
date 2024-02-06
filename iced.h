@@ -5,6 +5,20 @@
 void iced_init(void);
 void iced_gui(void);
 void iced_render(void);
+void fly_enable(bool enable);
+struct fly_state {
+	float dyaw;
+	float dpitch;
+	float dzoom;
+	int dforward;
+	int dright;
+	int speed;
+	bool accept;
+	bool cancel;
+};
+struct fly_state* get_fly_state(void);
+
+void imgui_own_wheel(void);
 
 static inline const char* gl_err_string(GLenum err)
 {

@@ -33,11 +33,7 @@ IMGUI_IMPL_API bool     ImGui_ImplSDL2_InitForMetal(SDL_Window* window);
 IMGUI_IMPL_API bool     ImGui_ImplSDL2_InitForSDLRenderer(SDL_Window* window, SDL_Renderer* renderer);
 IMGUI_IMPL_API bool     ImGui_ImplSDL2_InitForOther(SDL_Window* window);
 IMGUI_IMPL_API void     ImGui_ImplSDL2_Shutdown();
-IMGUI_IMPL_API void     ImGui_ImplSDL2_NewFrame();
+IMGUI_IMPL_API void     ImGui_ImplSDL2_NewFrame(bool accept_input);
 IMGUI_IMPL_API bool     ImGui_ImplSDL2_ProcessEvent(const SDL_Event* event);
-
-#ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
-static inline void ImGui_ImplSDL2_NewFrame(SDL_Window*) { ImGui_ImplSDL2_NewFrame(); } // 1.84: removed unnecessary parameter
-#endif
 
 #endif // #ifndef IMGUI_DISABLE

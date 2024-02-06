@@ -622,7 +622,7 @@ static void ImGui_ImplSDL2_UpdateGamepads()
     #undef MAP_ANALOG
 }
 
-void ImGui_ImplSDL2_NewFrame()
+void ImGui_ImplSDL2_NewFrame(bool accept_input)
 {
     ImGui_ImplSDL2_Data* bd = ImGui_ImplSDL2_GetBackendData();
     IM_ASSERT(bd != nullptr && "Did you call ImGui_ImplSDL2_Init()?");
@@ -651,18 +651,18 @@ void ImGui_ImplSDL2_NewFrame()
     io.DeltaTime = bd->Time > 0 ? (float)((double)(current_time - bd->Time) / frequency) : (float)(1.0f / 60.0f);
     bd->Time = current_time;
 
-    if (bd->PendingMouseLeaveFrame && bd->PendingMouseLeaveFrame >= ImGui::GetFrameCount() && bd->MouseButtonsDown == 0)
+    if (!accept_input || (bd->PendingMouseLeaveFrame && bd->PendingMouseLeaveFrame >= ImGui::GetFrameCount() && bd->MouseButtonsDown == 0))
     {
         bd->MouseWindowID = 0;
         bd->PendingMouseLeaveFrame = 0;
         io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
     }
 
-    ImGui_ImplSDL2_UpdateMouseData();
-    ImGui_ImplSDL2_UpdateMouseCursor();
-
-    // Update game controllers (if enabled and available)
-    ImGui_ImplSDL2_UpdateGamepads();
+    if (accept_input) {
+        ImGui_ImplSDL2_UpdateMouseData();
+        ImGui_ImplSDL2_UpdateMouseCursor();
+        ImGui_ImplSDL2_UpdateGamepads();
+    }
 }
 
 //-----------------------------------------------------------------------------

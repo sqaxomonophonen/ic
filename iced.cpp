@@ -14,7 +14,6 @@ extern "C" {
 }
 
 #include "imgui.h"
-#include "imgui_internal.h"
 #include "util.h"
 #include "iced.h"
 #include "stb_ds.h"
@@ -532,7 +531,7 @@ static void window_view(struct view_window* vw)
 
 		if (dim == 3) {
 			if (ImGui::Button("Fly")) {
-				// TODO wasd+mlock flymode
+				fly_enable(true);
 			}
 			ImGui::SameLine();
 		}
@@ -569,7 +568,7 @@ static void window_view(struct view_window* vw)
 			const int adjh = (((int)canvas_size.y) / px) * px;
 			const ImVec2 p1 = ImVec2(p0.x + adjw, p0.y + adjh);
 			ImGui::InvisibleButton("canvas", canvas_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-			ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // grab mouse wheel
+			imgui_own_wheel();
 			//const bool is_drag = ImGui::IsItemActive();
 			const bool is_hover = ImGui::IsItemHovered();
 			//const bool click_lmb = is_hover && ImGui::IsMouseClicked(0);
