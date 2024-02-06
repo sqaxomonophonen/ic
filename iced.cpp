@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdint.h>
 
 extern "C" {
 #include <lua.h>
@@ -17,6 +18,12 @@ extern "C" {
 #include "iced.h"
 #include "stb_ds.h"
 #include "gb_math.h"
+
+static uint64_t _serial;
+static uint64_t next_serial(void)
+{
+	return ++_serial;
+}
 
 bool has_glsl_error;
 static char glsl_error[1<<13];
@@ -141,6 +148,9 @@ static GLuint mk_compute_program(int n_sources, const char** sources)
 	glAttachShader(program, shader); CHKGL;
 	glLinkProgram(program); CHKGL;
 	check_program(program);
+	if (has_glsl_error) {
+		glDeleteProgram(program); CHKGL;
+	}
 
 	// when we have a program the shader is no longer needed
 	glDeleteShader(shader); CHKGL;
@@ -168,6 +178,9 @@ static GLuint mk_render_program(int n_vertex_sources, int n_fragment_sources, co
 	glAttachShader(program, fragment_shader); CHKGL;
 	glLinkProgram(program); CHKGL;
 	check_program(program);
+	if (has_glsl_error) {
+		glDeleteProgram(program); CHKGL;
+	}
 
 	// when we have a program the shaders are no longer needed
 	glDeleteShader(vertex_shader); CHKGL;
@@ -308,6 +321,130 @@ static void l_load(lua_State* L, const char* path)
 	}
 }
 
+struct view {
+	const char* name;
+	int dim;
+	GLuint prg0;
+	uint64_t serial;
+	// TODO GL resources...? program? and?
+};
+
+struct view_window {
+	const char* view_name;
+	const char* window_title;
+	int sequence;
+
+	bool autoload;
+	int pixel_size;
+
+	bool gl_initialized;
+	int fb_width, fb_height;
+	GLuint framebuffer;
+	GLuint texture;
+	ImVec2 canvas_size;
+
+	uint64_t serial;
+	uint64_t seen_serial;
+
+	gbVec3 origin;
+	float fov;
+	float pitch;
+	float yaw;
+	int width;
+	int height;
+	// TODO GL resources: texture/framebuffer? and?
+};
+
+static struct view* view_arr;
+static struct view_window* view_window_arr;
+
+
+#define IS_Q0 "(gl_VertexID == 0 || gl_VertexID == 3)"
+#define IS_Q1 "(gl_VertexID == 1)"
+#define IS_Q2 "(gl_VertexID == 2 || gl_VertexID == 4)"
+#define IS_Q3 "(gl_VertexID == 5)"
+
+static void reload_view(lua_State* L, struct view* view)
+{
+	lua_getglobal(L, "ll_view_run");
+	lua_pushstring(L, view->name);
+	int e = ecall(L, 1, 1);
+	if (e != 0) {
+		handle_lua_error();
+		return;
+	}
+
+	const char* glsl_src = lua_tostring(L, -1);
+	if (view->dim == 2) {
+		const char* sources[] = {
+
+			// vertex
+			"#version 460\n"
+			"\n"
+			"layout (location = 0) uniform vec2 u_p0;\n"
+			"layout (location = 1) uniform vec2 u_p1;\n"
+			"\n"
+			"out vec2 v_pos;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	vec2 c;\n"
+			"	if (" IS_Q0 ") {\n"
+			"		c = vec2(-1.0, -1.0);\n"
+			"		v_pos = vec2(u_p0.x, u_p0.y);\n"
+			"	} else if (" IS_Q1 ") {\n"
+			"		c = vec2( 1.0, -1.0);\n"
+			"		v_pos = vec2(u_p1.x, u_p0.y);\n"
+			"	} else if (" IS_Q2 ") {\n"
+			"		c = vec2( 1.0,  1.0);\n"
+			"		v_pos = vec2(u_p1.x, u_p1.y);\n"
+			"	} else if (" IS_Q3 ") {\n"
+			"		c = vec2(-1.0,  1.0);\n"
+			"		v_pos = vec2(u_p0.x, u_p1.y);\n"
+			"	}\n"
+			"	gl_Position = vec4(c,0.0,1.0);\n"
+			"}\n"
+			,
+
+			// fragment
+			"#version 460\n"
+			"\n"
+			,
+			glsl_src
+			,
+			"\n"
+			"in vec2 v_pos;\n"
+			"\n"
+			"layout (location = 0) out vec4 frag_color;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	float d = map(v_pos);\n"
+			"	float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;\n"
+			"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2, 0.3, 0.4);\n"
+			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
+			"	c += pow(cos(d*3.0), 20.0) * a0;\n"
+			"	frag_color = vec4(m*c, 1.0);\n"
+			"}\n"
+		};
+
+		GLuint new_prg = mk_render_program(1, 3, sources);
+		if (has_glsl_error) {
+			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
+			g.has_error = true;
+		} else {
+			if (view->prg0) glDeleteProgram(view->prg0); CHKGL;
+			view->prg0 = new_prg;
+			view->serial = next_serial();
+		}
+
+	} else if (view->dim == 3) {
+		assert(!"TODO 3D"); // XXX
+	}
+
+	lua_pop(L, 1);
+}
+
 static void lua_reload(void)
 {
 	assert(clock_gettime(CLOCK_REALTIME, &g.last_load_time) == 0);
@@ -317,7 +454,6 @@ static void lua_reload(void)
 		lua_close(g.L);
 		g.L = NULL;
 	}
-	g.has_error = false;
 	arrsetlen(g.watch_paths_arr, 0);
 	g.duration_load = 0;
 	g.duration_call = 0;
@@ -330,6 +466,11 @@ static void lua_reload(void)
 
 	l_load(L, "lib.lua");
 	l_load(L, "world.lua");
+
+	for (int i = 0; i < arrlen(view_arr); i++) {
+		struct view* view = &view_arr[i];
+		reload_view(L, view);
+	}
 }
 
 static void check_for_reload(void)
@@ -349,52 +490,17 @@ static void check_for_reload(void)
 		}
 		p += (n+1);
 	}
-	if (reload) lua_reload();
-}
+	if (!reload) return;
 
-#define IS_Q0 "(gl_VertexID == 0 || gl_VertexID == 3)"
-#define IS_Q1 "(gl_VertexID == 1)"
-#define IS_Q2 "(gl_VertexID == 2 || gl_VertexID == 4)"
-#define IS_Q3 "(gl_VertexID == 5)"
+	g.has_error = false;
+	lua_reload();
+}
 
 void iced_init(void)
 {
 	lua_reload();
 	glGenVertexArrays(1, &g.vao0); CHKGL;
 }
-
-struct view {
-	const char* name;
-	int dim;
-	GLuint prg0;
-	// TODO GL resources...? program? and?
-};
-
-struct view_window {
-	const char* view_name;
-	const char* window_title;
-	int sequence;
-
-	bool autoload;
-	int pixel_size;
-
-	bool gl_initialized;
-	int fb_width, fb_height;
-	GLuint framebuffer;
-	GLuint texture;
-	ImVec2 canvas_size;
-
-	gbVec3 origin;
-	float fov;
-	float pitch;
-	float yaw;
-	int width;
-	int height;
-	// TODO GL resources: texture/framebuffer? and?
-};
-
-static struct view* view_arr;
-static struct view_window* view_window_arr;
 
 static bool window_view(struct view_window* w)
 {
@@ -503,77 +609,7 @@ static void open_view(lua_State* L)
 	view.dim = lua_tointeger(L, -1);
 	lua_pop(L, 1);
 
-	lua_getglobal(L, "ll_view_run");
-	lua_pushvalue(L, -2);
-	int e = ecall(L, 1, 1);
-	if (e != 0) {
-		handle_lua_error();
-		return;
-	}
-
-	const char* glsl_src = lua_tostring(L, -1);
-	if (view.dim == 2) {
-		const char* sources[] = {
-
-			"#version 460\n"
-			"\n"
-			"layout (location = 0) uniform vec2 u_p0;\n"
-			"layout (location = 1) uniform vec2 u_p1;\n"
-			"\n"
-			"out vec2 v_pos;\n"
-			"\n"
-			"void main()\n"
-			"{\n"
-			"	vec2 c;\n"
-			"	if (" IS_Q0 ") {\n"
-			"		c = vec2(-1.0, -1.0);\n"
-			"		v_pos = vec2(u_p0.x, u_p0.y);\n"
-			"	} else if (" IS_Q1 ") {\n"
-			"		c = vec2( 1.0, -1.0);\n"
-			"		v_pos = vec2(u_p1.x, u_p0.y);\n"
-			"	} else if (" IS_Q2 ") {\n"
-			"		c = vec2( 1.0,  1.0);\n"
-			"		v_pos = vec2(u_p1.x, u_p1.y);\n"
-			"	} else if (" IS_Q3 ") {\n"
-			"		c = vec2(-1.0,  1.0);\n"
-			"		v_pos = vec2(u_p0.x, u_p1.y);\n"
-			"	}\n"
-			"	gl_Position = vec4(c,0.0,1.0);\n"
-			"}\n"
-			,
-
-			"#version 460\n"
-			"\n"
-			,
-			glsl_src
-			,
-
-			"\n"
-			"in vec2 v_pos;\n"
-			"\n"
-			"layout (location = 0) out vec4 frag_color;\n"
-			"\n"
-			"void main()\n"
-			"{\n"
-			"	float d = map(v_pos);\n"
-			"	float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;\n"
-			"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2, 0.3, 0.4);\n"
-			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
-			"	c += pow(cos(d*3.0), 20.0) * a0;\n"
-			"	frag_color = vec4(m*c, 1.0);\n"
-			"}\n"
-		};
-
-		view.prg0 = mk_render_program(1, 3, sources);
-		if (has_glsl_error) {
-			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
-			g.has_error = true;
-		}
-	} else if (view.dim == 3) {
-		assert(!"TODO 3D"); // XXX
-	}
-
-	lua_pop(L, 1);
+	reload_view(L, &view);
 
 	if (!g.has_error) {
 		arrput(view_arr, view);
@@ -699,7 +735,10 @@ void iced_render(void)
 
 		if (fb_width <= 0 || fb_height <= 0) continue;
 
-		bool do_render = false; // FIXME true if stuff has otherwise changed
+		bool do_render = (view->serial > vw->seen_serial) || (vw->serial > vw->seen_serial);
+
+		if (view->serial > vw->seen_serial) vw->seen_serial = view->serial;
+		if (vw->serial > vw->seen_serial) vw->seen_serial = vw->serial;
 
 		if (!vw->gl_initialized) {
 			glGenFramebuffers(1, &vw->framebuffer); CHKGL;

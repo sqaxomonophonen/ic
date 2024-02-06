@@ -19,6 +19,10 @@ end)
 
 view2d("shape", function()
 	sdf2d:circle(3)
+	tx2d:translate{5,0} sdf2d:circle(2) pop()
+	tx2d:translate{-5,0} sdf2d:circle(2) pop()
+	tx2d:translate{8,0} sdf2d:circle(1) pop()
+	tx2d:translate{-8,0} sdf2d:circle(1) pop()
 end)
 
 header("primitives")

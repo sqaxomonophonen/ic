@@ -225,7 +225,9 @@ function header(title)
 	table.insert(ll_views, {header=title})
 end
 
-function ll_view_run(view)
+function ll_view_run(name)
+	local view = name_view_map[name]
+	assert(view, "no such view: " .. name)
 	RESET(view.dim)
 	view.ctor()
 	return EMIT()
@@ -375,6 +377,17 @@ DEF{
 	float $(vec2 p, float r)
 	{
 		return length(p)-r;
+	}
+	]] },
+}
+
+DEF{
+	"tx2d:translate",
+	argfmt = "2",
+	glsl = { tx = [[
+	vec2 $(vec2 p, vec2 r)
+	{
+		return p+r;
 	}
 	]] },
 }
