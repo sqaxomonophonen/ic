@@ -330,6 +330,8 @@ struct view {
 };
 
 struct view_window {
+	bool dispose;
+
 	const char* view_name;
 	const char* window_title;
 	int sequence;
@@ -518,7 +520,7 @@ static struct view* get_view_window_view(struct view_window* vw)
 	assert(!"no view?!");
 }
 
-static bool window_view(struct view_window* vw)
+static void window_view(struct view_window* vw)
 {
 	struct view* view = get_view_window_view(vw);
 	ImGuiIO& io = ImGui::GetIO();
@@ -602,21 +604,27 @@ static bool window_view(struct view_window* vw)
 				}
 			}
 
-			if (vw->gl_initialized) {
+			if (vw->gl_initialized && vw->texture) {
 				ImDrawList* draw_list = ImGui::GetWindowDrawList();
 				draw_list->AddImage((void*)(intptr_t)vw->texture, p0, p1);
 			}
 		}
 	}
 	ImGui::End();
-	return show;
+	if (!show) vw->dispose = true;
 }
 
-static void view_window_close(struct view_window* w)
+static void view_window_free(struct view_window* vw)
 {
-	free((void*)w->view_name);
-	free((void*)w->window_title);
-	// TODO GL resources
+	if (vw->gl_initialized) {
+		glDeleteTextures(1, &vw->texture);
+		glDeleteFramebuffers(1, &vw->framebuffer);
+		vw->texture = 0;
+		vw->framebuffer = 0;
+		vw->gl_initialized = false;
+	}
+	free((void*)vw->view_name);
+	free((void*)vw->window_title);
 }
 
 static void lua_api_error(const char* msg)
@@ -761,18 +769,21 @@ static void window_main(void)
 
 void iced_gui(void)
 {
+	for (int i = 0; i < arrlen(view_window_arr); i++) {
+		struct view_window* vw = &view_window_arr[i];
+		if (vw->dispose) {
+			view_window_free(vw);
+			arrdel(view_window_arr, i);
+			i--;
+		}
+	}
 	check_for_reload();
 	window_main();
 
 	for (int i = 0; i < arrlen(view_window_arr); i++) {
 		struct view_window* vw = &view_window_arr[i];
-		if (!window_view(vw)) {
-			view_window_close(vw);
-			arrdel(view_window_arr, i);
-			i--;
-		}
+		window_view(vw);
 	}
-
 }
 
 static inline float fremap(float i, float i0, float i1, float o0, float o1)
