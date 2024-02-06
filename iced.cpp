@@ -345,8 +345,6 @@ struct view_window {
 	uint64_t serial;
 	uint64_t seen_serial;
 
-	ImVec2 last_mousepos;
-
 	struct {
 		gbVec2 origin;
 		float scale;
@@ -545,6 +543,21 @@ static bool window_view(struct view_window* vw)
 
 		const ImVec2 p0 = ImGui::GetCursorScreenPos();
 		const ImVec2 canvas_size = ImGui::GetContentRegionAvail();
+
+		const ImVec2 mousepos = io.MousePos;
+		const bool mousepos_avail = mousepos.x != -FLT_MAX;
+		const float mx = mousepos.x - (p0.x + canvas_size.x * 0.5f);
+		const float my = mousepos.y - (p0.y + canvas_size.y * 0.5f);
+
+		if (dim == 2) {
+			if (mousepos_avail) {
+				ImGui::SameLine();
+				const float x = vw->d2.origin.x + mx * vw->d2.scale;
+				const float y = vw->d2.origin.y + my * vw->d2.scale;
+				ImGui::Text("[%.3f,%.3f]", x, y);
+			}
+		}
+
 		if (canvas_size.x > 0 && canvas_size.y > 0) {
 			vw->canvas_size = canvas_size;
 			const int px = vw->pixel_size+1;
@@ -559,25 +572,21 @@ static bool window_view(struct view_window* vw)
 			const bool click_rmb = is_hover && ImGui::IsMouseClicked(1);
 			//const bool doubleclick_rmb = is_hover && ImGui::IsMouseDoubleClicked(1);
 			const float mw = io.MouseWheel;
-			const ImVec2 mousepos = io.MousePos;
 
 			if (dim == 2) {
 				if (click_rmb) {
 					vw->d2.is_panning = true;
-					vw->last_mousepos = mousepos;
 				}
 
 				if (vw->d2.is_panning) {
-					float dx = mousepos.x - vw->last_mousepos.x;
-					float dy = mousepos.y - vw->last_mousepos.y;
-					if (dx != 0 || dy != 0) {
+					ImVec2 d = io.MouseDelta;
+					if (d.x != 0 || d.y != 0) {
 						const float s = vw->d2.scale;
-						vw->d2.origin.x -= dx*s;
-						vw->d2.origin.y -= dy*s;
+						vw->d2.origin.x -= d.x*s;
+						vw->d2.origin.y -= d.y*s;
 						vw->serial = next_serial();
 					}
 
-					vw->last_mousepos = mousepos;
 					if (ImGui::IsMouseReleased(1)) {
 						vw->d2.is_panning = false;
 					}
@@ -587,8 +596,6 @@ static bool window_view(struct view_window* vw)
 					const float sc0 = vw->d2.scale;
 					vw->d2.scale *= powf(1.02f, -mw);
 					const float sc1 = vw->d2.scale;
-					const float mx = mousepos.x - (p0.x + canvas_size.x * 0.5f);
-					const float my = mousepos.y - (p0.y + canvas_size.y * 0.5f);
 					vw->d2.origin.x += (mx * sc0) - (mx * sc1);
 					vw->d2.origin.y += (my * sc0) - (my * sc1);
 					vw->serial = next_serial();

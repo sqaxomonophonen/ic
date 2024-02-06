@@ -18,12 +18,13 @@ view3d("main", function()
 end)
 
 view2d("shape", function()
+	d21:smooth_union(0.5)
 	sdf2d:circle(3)
-	local x = 1.5
-	tx2d:translate{5,3} sdf2d:circle(2) pop()
-	tx2d:translate{-5,-3} sdf2d:circle(2) pop()
-	tx2d:translate{8,0} sdf2d:circle(x) pop()
-	tx2d:translate{-8,0} sdf2d:circle(x) pop()
+	tx2d:translate{5,0} sdf2d:circle(2) pop()
+	tx2d:translate{-5,-0} sdf2d:circle(2) pop()
+	tx2d:translate{8,0} sdf2d:circle(1) pop()
+	tx2d:translate{-8,0} sdf2d:circle(1) pop()
+	pop()
 end)
 
 header("primitives")
