@@ -430,7 +430,9 @@ static void reload_view(lua_State* L, struct view* view)
 			"	m2 = m2*m2*m2;\n"
 			"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2*m2, 0.3*m2, 0.4);\n"
 			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
-			"	c += pow(cos(d*3.0), 20.0) * a0;\n"
+			"	float cc = cos(d*3.0);\n"
+			"	cc = cc*cc*cc*cc*cc*cc*cc*cc*cc;\n"
+			"	c += cc * a0;\n"
 			"	frag_color = vec4(m*c, 1.0);\n"
 			"}\n"
 		};
