@@ -7,12 +7,6 @@
 #include <time.h>
 #include <stdint.h>
 
-extern "C" {
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
-}
-
 #include "imgui.h"
 #include "util.h"
 #include "iced.h"
@@ -210,7 +204,6 @@ static char* read_file(const char* path, size_t* out_size)
 static struct globals {
 	bool has_error;
 	char error_message[1<<14];
-	lua_State* L;
 	char* watch_paths_arr;
 	struct timespec last_load_time;
 	double duration_load;
@@ -245,20 +238,6 @@ static inline int timespec_compar(const struct timespec* ta, const struct timesp
 	}
 }
 
-static int lc_watch_file(lua_State* L)
-{
-	const int n = lua_gettop(L);
-	if (n >= 1) watch_file(lua_tostring(L, 1));
-	return 0;
-}
-
-static int l_errhandler(lua_State *L)
-{
-	const char* msg = lua_tostring(L, 1);
-	luaL_traceback(L, L, msg, 1);
-	return 1;
-}
-
 static struct timespec timer_begin(void)
 {
 	struct timespec t0;
@@ -273,52 +252,6 @@ static double timer_end(struct timespec t0)
 	return
 		((double)(t1.tv_sec) - (double)(t0.tv_sec)) +
 		1e-9 * ((double)(t1.tv_nsec) - (double)(t0.tv_nsec));
-}
-
-static int ecall(lua_State *L, int narg, int nres)
-{
-	// "stolen" from `docall()` in `lua.c`
-	struct timespec t0 = timer_begin();
-	int base = lua_gettop(L) - narg;
-	lua_pushcfunction(L, l_errhandler);
-	lua_insert(L, base);
-	int e = lua_pcall(L, narg, nres, base);
-	lua_remove(L, base);
-	g.duration_call = timer_end(t0);
-	return e;
-}
-
-static int edofile(lua_State *L, const char* path)
-{
-	struct timespec t0 = timer_begin();
-	int e;
-	e = luaL_loadfile(L, path);
-	if (e != 0) return e;
-	e = ecall(L, 0, LUA_MULTRET);
-	g.duration_load = timer_end(t0);
-	return e;
-}
-
-
-static void handle_lua_error(void)
-{
-	g.has_error = true;
-	lua_State* L = g.L;
-	const char* err = lua_tostring(L, -1);
-	fprintf(stderr, "LUA ERROR: %s\n", err);
-	snprintf(g.error_message, sizeof g.error_message, "[LUA ERROR] %s", err);
-	lua_pop(L, 1);
-}
-
-static void l_load(lua_State* L, const char* path)
-{
-	watch_file(path);
-	if (g.has_error) return;
-	int e = edofile(L, path);
-	if (e != 0) {
-		handle_lua_error();
-		return;
-	}
 }
 
 struct view {
@@ -369,17 +302,9 @@ static struct view_window* view_window_arr;
 #define IS_Q2 "(gl_VertexID == 2 || gl_VertexID == 4)"
 #define IS_Q3 "(gl_VertexID == 5)"
 
-static void reload_view(lua_State* L, struct view* view)
+static void reload_view(struct view* view)
 {
-	lua_getglobal(L, "ll_view_run");
-	lua_pushstring(L, view->name);
-	int e = ecall(L, 1, 1);
-	if (e != 0) {
-		handle_lua_error();
-		return;
-	}
-
-	const char* glsl_src = lua_tostring(L, -1);
+	const char* glsl_src = "XXX"; // XXX
 	if (view->dim == 2) {
 		const char* sources[] = {
 
@@ -450,35 +375,22 @@ static void reload_view(lua_State* L, struct view* view)
 	} else if (view->dim == 3) {
 		assert(!"TODO 3D"); // XXX
 	}
-
-	lua_pop(L, 1);
 }
 
-static void lua_reload(void)
+static void reload_script(void)
 {
 	assert(clock_gettime(CLOCK_REALTIME, &g.last_load_time) == 0);
 	//dump_timespec(&g.last_load_time);
 
-	if (g.L != NULL) {
-		lua_close(g.L);
-		g.L = NULL;
-	}
 	arrsetlen(g.watch_paths_arr, 0);
 	g.duration_load = 0;
 	g.duration_call = 0;
 
-	lua_State* L = g.L = luaL_newstate();
-	luaL_openlibs(L);
-
-	lua_pushcfunction(L, lc_watch_file);
-	lua_setglobal(L, "lc_watch_file");
-
-	l_load(L, "lib.lua");
-	l_load(L, "world.lua");
+	// TODO
 
 	for (int i = 0; i < arrlen(view_arr); i++) {
 		struct view* view = &view_arr[i];
-		reload_view(L, view);
+		reload_view(view);
 	}
 }
 
@@ -502,12 +414,12 @@ static void check_for_reload(void)
 	if (!reload) return;
 
 	g.has_error = false;
-	lua_reload();
+	reload_script();
 }
 
 void iced_init(void)
 {
-	lua_reload();
+	reload_script();
 	glGenVertexArrays(1, &g.vao0); CHKGL;
 }
 
@@ -674,103 +586,20 @@ static void open_view_window(struct view* view)
 	arrput(view_window_arr, vw);
 }
 
-static void open_view(lua_State* L)
-{
-	lua_getfield(L, -1, "name");
-	const char* name = lua_tostring(L, -1);
-	const int n = arrlen(view_arr);
-	for (int i = 0; i < n; i++) {
-		struct view* view = &view_arr[i];
-		if (strcmp(view->name, name) == 0) {
-			lua_pop(L, 1);
-			open_view_window(view);
-			return;
-		}
-	}
-
-	struct view view = {0};
-	view.name = cstrdup(name);
-	lua_pop(L, 1);
-
-	lua_getfield(L, -1, "dim");
-	view.dim = lua_tointeger(L, -1);
-	lua_pop(L, 1);
-
-	reload_view(L, &view);
-
-	if (!g.has_error) {
-		arrput(view_arr, view);
-		open_view_window(&view);
-	}
-}
-
-
 static void window_main(void)
 {
 	static bool show_main = true;
 	if (show_main) {
 		if (ImGui::Begin("Main", &show_main)) {
-			lua_State* L = g.L;
-
 			if (g.has_error) {
 				ImGui::SeparatorText("Error");
 				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.error_message);
 			}
 
 			ImGui::SeparatorText("Status");
-			ImGui::Text("Load: %fs\nCall: %fs\nStack: %d",
+			ImGui::Text("Load: %fs\nCall: %fs",
 				g.duration_load,
-				g.duration_call,
-				lua_gettop(L));
-
-			if (L != NULL) {
-				lua_getglobal(L, "ll_views");
-				if (!lua_istable(L, -1)) {
-					lua_api_error("no global table named \"ll_views\"");
-				} else {
-					unsigned n = lua_rawlen(L, -1);
-					bool show = true;
-					for (unsigned i = 1; i <= n; i++) {
-						if (i == 1) ImGui::SeparatorText("Views");
-
-						lua_rawgeti(L, -1, i);
-
-						lua_getfield(L, -1, "header");
-						if (!lua_isnil(L, -1)) {
-							const char* header = lua_tostring(L, -1);
-							show = ImGui::CollapsingHeader(header, ImGuiTreeNodeFlags_None);
-							lua_pop(L, 2);
-							continue;
-						} else {
-							lua_pop(L, 1);
-						}
-
-						if (!show) {
-							lua_pop(L, 1);
-							continue;
-						}
-
-						lua_getfield(L, -1, "dim");
-						const int dim = lua_tointeger(L, -1);
-						if (dim != 2 && dim != 3) {
-							lua_api_error("view dimension is not 2 or 3");
-							break;
-						}
-						lua_pop(L, 1);
-
-						lua_getfield(L, -1, "name");
-						const char* name = lua_tostring(L, -1);
-						char buf[1<<10];
-						snprintf(buf, sizeof buf, "[%dD] %s##view%d", dim, name, i);
-						lua_pop(L, 1);
-
-						if (ImGui::Button(buf)) open_view(L);
-
-						lua_pop(L, 1);
-					}
-				}
-				lua_pop(L, 1);
-			}
+				g.duration_call);
 		}
 		ImGui::End();
 	}

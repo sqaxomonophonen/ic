@@ -8,9 +8,6 @@ PKGS=sdl2 gl
 CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
 LDLIBS+=$(shell pkg-config --libs ${PKGS})
 
-CXXFLAGS+=-I./lua
-LDLIBS+=-L./lua -llua
-
 CXXFLAGS+=-I./imgui
 LDLIBS+=-L./imgui -limgui
 
