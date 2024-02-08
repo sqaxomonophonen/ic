@@ -123,26 +123,28 @@ d11      = NODECLASS{            F={"d11"}}
 d21      = NODECLASS{            F={"d21","d2m21"}}
 
 local ST
-local function stackpush(D,pvar,def,glsl_argstr)
-	table.insert(ST.stack, {
-		D=D,
-		pvar=pvar,
-		def=def,
-		glsl_argstr=glsl_argstr,
-		dvar=nil,
-	})
-end
 local function stacktop()
 	return ST.stack[#ST.stack]
+end
+local function stackpush(element)
+	local top = stacktop() or {}
+	table.insert(ST.stack, {
+		D=element.D or top.D,
+		pvar=element.pvar or top.pvar,
+		layerselect=element.layerselect or top.layerselect,
+		def=element.def,
+		glsl_argstr=element.glsl_argstr,
+		dvar=element.dvar,
+	})
 end
 
 local defmap = {}
 
-local function depdef(name)
-	if ST.defset[name] ~= nil then
+local function include(name)
+	if ST.includeset[name] ~= nil then
 		return
 	end
-	ST.defset[name] = true
+	ST.includeset[name] = true
 	local def = defmap[name]
 	for k,src in ksortpairs(def.glsl or {}) do
 		local fn = def.glsl_names[k]
@@ -153,31 +155,39 @@ local function depdef(name)
 	end
 end
 
-function RESET(dim)
+function RESET(D,layer)
 	ST = {
-		defset = {},
+		includeset = {},
 		src0 = {},
 		stack = {},
 		mapgen = mkgen(),
+		layer = layer or 1,
+		seen_layer_set = {[1]=true},
 	}
-
-	depdef("d21:union")
-
+	include("d21:union")
 	local g = ST.mapgen
-	local p0 = g:var("p")
-	g:linef("float map(vec%d %s)", dim, p0)
+	local pvar = g:var("p")
+	local fn = "map" -- XXX other map functions for other layers?
+	-- TODO material
+	g:linef("float %s(vec%d %s)", fn, D, pvar)
 	g:line("{")
-	stackpush(dim, p0)
+	stackpush{D=D, pvar=pvar, layerselect=(ST.layer==1)}
 end
 
-local function rjoin(e0, e1)
+local function rjoin(e1)
+	local e0 = stacktop()
 	local implicit = defmap["d21:union"]
 	local def = e0.def or implicit
+	if not e0.layerselect then
+		-- don't do fancy boolean ops when layer is not selected, only normal
+		-- union
+		def = implicit
+	end
 	local fn = def.glsl_names.d21
 	local argstr = e0.glsl_argstr or ""
 	if not fn then
 		fn = implicit.glsl_names.d21
-		assert(fn, "missing depdef")
+		assert(fn, "missing include()")
 		argstr = ""
 	end
 
@@ -191,7 +201,7 @@ local function rjoin(e0, e1)
 	else
 		local g = ST.mapgen
 		d = g:var("d")
-		g:linef("\tfloat %s = %s(%s, %s%s);", d, fn, d0, d1, argstr)
+		g:linef("\tfloat %s = %s(%s, %s%s);", d, fn, d1, d0, argstr)
 	end
 	e0.dvar = d
 end
@@ -230,7 +240,13 @@ function ll_view_run(name)
 	assert(view, "no such view: " .. name)
 	RESET(view.dim)
 	view.ctor()
-	return EMIT()
+	local r = EMIT()
+	for k in pairs(ST.seen_layer_set) do print("SEEN " .. k) end
+	return r
+end
+
+local function layerselect()
+	return stacktop().layerselect
 end
 
 function pop(n)
@@ -241,19 +257,20 @@ function pop(n)
 		assert(#ST.stack >= 2, "stack underflow (cannot pop root element)")
 		local top0 = stacktop()
 		local def = top0.def
-
-		local fn_d11 = def.glsl_names.d11
-		if fn_d11 then
-			local dn = g:var("d")
-			g:linef("\tfloat %s = %s(%s%s);", dn, fn_d11, top0.dvar, top0.glsl_argstr)
-			top0.dvar = dn
+		if def and layerselect() then
+			local fn_d11 = def.glsl_names.d11
+			if fn_d11 then
+				local dn = g:var("d")
+				g:linef("\tfloat %s = %s(%s%s);", dn, fn_d11, top0.dvar, top0.glsl_argstr)
+				top0.dvar = dn
+			end
 		end
 
 		table.remove(ST.stack)
-		local top1 = stacktop()
-		rjoin(top1, top0)
+		rjoin(top0)
 	end
 end
+
 function chain()
 	error("TODO") -- TODO
 end
@@ -264,6 +281,53 @@ end
 local function callsite()
 	local info = debug.getinfo(3, 'lS')
 	return string.sub(info.source, 2) .. ":" .. info.currentline
+end
+
+function mk_popper()
+	return setmetatable({
+		stack0 = #ST.stack,
+	}, {
+		__close = function(self)
+			local n = #ST.stack - self.stack0
+			assert(n >= 0, string.format("closer cannot pop("..n..")"))
+			pop(n)
+		end,
+	})
+end
+
+function layers(...)
+	local s = false
+	local xs = {...}
+	for i=1,#xs do
+		local layer = xs[i]
+		ST.seen_layer_set[layer] = true
+		if layer == ST.layer then
+			s = true
+		end
+	end
+	stackpush{layerselect=s}
+	return mk_popper()
+end
+
+function dbg(n)
+	local name = "dbg"..(1 or n)
+	-- XXX should probably def_layer(name, ...) if not defined
+	return layers(1, name)
+end
+
+function material(name)
+	error("TODO") -- TODO stackpush()
+	return mk_popper()
+end
+
+function DEF_LAYER(def)
+	def.name = def.name or def[1]
+	error("TODO")
+end
+
+function DEF_MATERIAL(def)
+	def.name = def.name or def[1]
+	error("TODO")
 end
 
 function DEF(def)
@@ -327,7 +391,7 @@ function DEF(def)
 			glsl_argstr = glsl_argstr .. ", " .. c
 		end
 
-		depdef(name)
+		include(name)
 
 		local fn_tx = def.glsl_names.tx
 		local fn_map = def.glsl_names.map
@@ -337,7 +401,7 @@ function DEF(def)
 		local DC = nodeclass.D
 		local D0 <const> = top.D
 		local D1 = D0
-		local p = top.pvar
+		local pvar = top.pvar
 
 		local is_leaf = false
 
@@ -347,32 +411,26 @@ function DEF(def)
 			local D1 = nodeclass.DD or DC
 			assert(D1)
 			local pn = g:var("p")
-			g:linef("\tvec%d %s = %s(%s%s);", D1, pn, fn_tx, p, glsl_argstr)
-			p = pn
+			g:linef("\tvec%d %s = %s(%s%s);", D1, pn, fn_tx, pvar, glsl_argstr)
+			pvar = pn
 		end
 
 		if fn_map then
 			assert(DC)
 			assert(DC == D0, string.format("%dD map-node in %dD context", DC, D0))
-			local dn = g:var("d")
-			g:linef("\tfloat %s = %s(%s%s);", dn, fn_map, p, glsl_argstr)
 			is_leaf = true
-			rjoin(top, {dvar=dn})
+			if layerselect() then
+				local dn = g:var("d")
+				g:linef("\tfloat %s = %s(%s%s);", dn, fn_map, pvar, glsl_argstr)
+				rjoin({dvar=dn})
+			end
 		end
 
 		if not is_leaf then
-			stackpush(D1, p, def, glsl_argstr)
+			stackpush{D=D1, pvar=pvar, def=def, glsl_argstr=glsl_argstr}
 		end
 
-		return setmetatable({
-			stack0 = #ST.stack,
-		}, {
-			__close = function(self)
-				local n = #ST.stack - self.stack0
-				assert(n > 0, string.format("closer expected request to pop at least 1 element; got %d", n))
-				pop(n)
-			end,
-		})
+		return mk_popper()
 	end
 end
 
@@ -479,6 +537,31 @@ DEF{
 		{
 			float h = clamp(0.5 + 0.5*(d1-d0)/k, 0.0, 1.0);
 			return mix(d1, d0, h) - k*h*(1.0-h);
+		}
+		]],
+	},
+}
+
+DEF{
+	"d21:subtract",
+	glsl = {
+		d21 = [[
+		float $(float d0, float d1)
+		{
+			return max(-d0, d1);
+		}
+		]],
+	},
+}
+
+
+DEF{
+	"d21:displace",
+	glsl = {
+		d21 = [[
+		float $(float d0, float d1)
+		{
+			return d0 + d1;
 		}
 		]],
 	},
