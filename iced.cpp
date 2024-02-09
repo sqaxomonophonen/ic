@@ -502,46 +502,6 @@ static void reload_script(void)
 		}
 	}
 
-	if (g.python_initialized) {
-		PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "viewlist");
-		if (pfn == NULL) {
-			raise_errorf("`viewlist` does not exist");
-		} else {
-			if (!PyCallable_Check(pfn)) {
-				raise_errorf("`viewlist` is not callable");
-			} else {
-				PyObject* pr = PyObject_CallObject(pfn, NULL);
-				if (pr == NULL) {
-					raise_errorf("`viewlist()` failed");
-				} else {
-					PyObject* it = PyObject_GetIter(pr);
-					if (it == NULL) {
-						raise_errorf("`viewlist()` return value is not iterable");
-					} else {
-						PyObject* item;
-						while ((item = PyIter_Next(it)) != NULL) {
-							PyObject* name = PyObject_GetAttrString(item, "name");
-							PyObject* dim = PyObject_GetAttrString(item, "dim");
-							if (name != NULL && dim != NULL) {
-								long dimlong = PyLong_AsLong(dim);
-								// TODO
-								printf("viewlist item name=[%s] dim=%ld\n",
-										PyUnicode_AsUTF8(name),
-										dimlong);
-							}
-							Py_XDECREF(dim);
-							Py_XDECREF(name);
-							Py_DECREF(item);
-						}
-						Py_DECREF(it);
-					}
-					Py_DECREF(pr);
-				}
-			}
-			Py_DECREF(pfn);
-		}
-	}
-
 	g.duration_load = timer_end(t0);
 
 	for (int i = 0; i < arrlen(view_arr); i++) {
@@ -727,6 +687,8 @@ static void open_view_window(struct view* view)
 	arrput(view_window_arr, vw);
 }
 
+static const ImVec4 errtxt = ImVec4(1.0f, 0.7f, 0.7f, 1.0f);
+
 static void window_main(void)
 {
 	static bool show_main = true;
@@ -734,7 +696,7 @@ static void window_main(void)
 		if (ImGui::Begin("Main", &show_main)) {
 			if (g.has_error) {
 				ImGui::SeparatorText("Error");
-				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.error_message);
+				ImGui::TextColored(errtxt, "%s", g.error_message);
 			}
 
 			char gc[1<<12];
@@ -773,6 +735,62 @@ static void window_main(void)
 			if (ImGui::Button("Hard")) {
 				g.python_do_reinitialize = true;
 				reload_script();
+			}
+
+			ImGui::SeparatorText("Views");
+			if (!g.python_initialized) {
+				ImGui::TextColored(errtxt, "python not initialized");
+			} else {
+				PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "viewlist");
+				if (pfn == NULL) {
+					ImGui::TextColored(errtxt, "`viewlist()` does not exist");
+				} else {
+					if (!PyCallable_Check(pfn)) {
+						ImGui::TextColored(errtxt, "`viewlist()` is not callable");
+					} else {
+						PyObject* pr = PyObject_CallObject(pfn, NULL);
+						if (pr == NULL) {
+							ImGui::TextColored(errtxt, "`viewlist()` call failed");
+						} else {
+							PyObject* it = PyObject_GetIter(pr);
+							if (it == NULL) {
+								ImGui::TextColored(errtxt, "`viewlist()` return value is not iterable");
+							} else {
+								PyObject* item;
+								while ((item = PyIter_Next(it)) != NULL) {
+									PyObject* name = PyObject_GetAttrString(item, "name");
+									PyObject* dim = PyObject_GetAttrString(item, "dim");
+									if (name != NULL && dim != NULL) {
+										char buf[1<<12];
+										const char* view_str = PyUnicode_AsUTF8(name);
+										snprintf(buf, sizeof buf, "[%ldD] %s", PyLong_AsLong(dim), view_str);
+										if (ImGui::Button(buf)) {
+											PyObject* pfn2 = PyObject_GetAttrString(item, "fn");
+											if (pfn2 == NULL) {
+												raise_errorf("view [%s] has no `fn`", view_str);
+											} else {
+												if (!PyCallable_Check(pfn2)) {
+													raise_errorf("view [%s] has `fn` but it is not callable", view_str);
+												} else {
+													PyObject_CallObject(pfn2, NULL);
+													printf("TODO\n"); // TODO
+
+												}
+												Py_DECREF(pfn2);
+											}
+										}
+									}
+									Py_XDECREF(dim);
+									Py_XDECREF(name);
+									Py_DECREF(item);
+								}
+								Py_DECREF(it);
+							}
+							Py_DECREF(pr);
+						}
+					}
+					Py_DECREF(pfn);
+				}
 			}
 		}
 		ImGui::End();
