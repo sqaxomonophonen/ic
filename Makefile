@@ -7,8 +7,8 @@ PKGS=sdl2 gl
 CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
 LDLIBS+=$(shell pkg-config --libs ${PKGS})
 
-CXXFLAGS+=$(shell python3.10-config --includes)
-LDLIBS+=$(shell python3.10-config --ldflags --embed)
+CXXFLAGS+=$(shell python3-config --includes)
+LDLIBS+=$(shell python3-config --ldflags --embed)
 
 CXXFLAGS+=-I./imgui
 LDLIBS+=-L./imgui -limgui
