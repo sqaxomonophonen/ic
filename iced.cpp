@@ -216,6 +216,7 @@ static struct globals {
 	bool python_initialized;
 	bool python_do_reinitialize;
 	PyObject* python_world_module;
+	PyObject* python_iclib_module;
 	bool has_error;
 	char error_message[1<<14];
 	char* watch_paths_arr;
@@ -227,6 +228,7 @@ static struct globals {
 
 static void watch_file(const char* path)
 {
+	//printf("watching [%s]\n", path);
 	const size_t n = strlen(path)+1;
 	char* d = arraddnptr(g.watch_paths_arr, n);
 	memcpy(d, path, n);
@@ -393,6 +395,15 @@ static void reload_view(struct view* view)
 	}
 }
 
+static void raise_errorf(const char* fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	vsnprintf(g.error_message, sizeof g.error_message, fmt, args);
+	g.has_error = true;
+	va_end(args);
+}
+
 static void reload_script(void)
 {
 	assert(clock_gettime(CLOCK_REALTIME, &g.last_load_time) == 0);
@@ -426,40 +437,108 @@ static void reload_script(void)
 		PyObject* pn = PyUnicode_DecodeFSDefault("world");
 		g.python_world_module = PyImport_Import(pn);
 		Py_DECREF(pn);
+		if (g.python_world_module != NULL) {
+			pn = PyUnicode_DecodeFSDefault("iclib");
+			g.python_iclib_module = PyImport_Import(pn);
+			Py_DECREF(pn);
+		}
 	} else {
-		g.python_world_module = PyImport_ReloadModule(g.python_world_module);
+		g.python_iclib_module = PyImport_ReloadModule(g.python_iclib_module);
+		if (g.python_iclib_module != NULL) {
+			g.python_world_module = PyImport_ReloadModule(g.python_world_module);
+		}
 	}
-	if (g.python_world_module == NULL) {
-		PyErr_Print();
-		fprintf(stderr, "ERROR: import failed\n");
+	if (g.python_world_module == NULL || g.python_iclib_module == NULL) {
+		//PyErr_Print();
+		PyObject* ptype;
+		PyObject* pvalue;
+		PyObject* ptraceback;
+		PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+		raise_errorf("world/iclib-import failed");
+		if (pvalue != NULL) {
+			PyObject* pstr = PyObject_Str(pvalue);
+			if (pstr) {
+				const char* err_msg = PyUnicode_AsUTF8(pstr);
+				raise_errorf("world-import failed: %s", err_msg);
+				Py_DECREF(pstr);
+			}
+			PyErr_Restore(ptype, pvalue, ptraceback);
+		}
 		g.python_initialized = false;
+		fprintf(stderr, "ERROR: import failed\n");
 	}
 
-	PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "watchlist");
-	if (pfn != NULL) {
-		if (PyCallable_Check(pfn)) {
-			PyObject* pr = PyObject_CallObject(pfn, NULL);
-			if (pr != NULL) {
-				PyObject* it = PyObject_GetIter(pr);
-				if (it != NULL) {
-					PyObject* item;
-					arrsetlen(g.watch_paths_arr, 0);
-					while ((item = PyIter_Next(it)) != NULL) {
-						PyObject* item_str = PyUnicode_AsEncodedString(item, "utf-8", "Error ~");
-						if (item_str != NULL) {
-							char* item_cstr = PyBytes_AS_STRING(item_str);
-							watch_file(item_cstr);
-							Py_DECREF(item_str);
+	if (g.python_initialized) {
+		PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "watchlist");
+		if (pfn == NULL) {
+			raise_errorf("`watchlist` does not exist");
+		} else {
+			if (!PyCallable_Check(pfn)) {
+				raise_errorf("`watchlist` is not callable");
+			} else {
+				PyObject* pr = PyObject_CallObject(pfn, NULL);
+				if (pr == NULL) {
+					raise_errorf("`watchlist()` failed");
+				} else {
+					PyObject* it = PyObject_GetIter(pr);
+					if (it == NULL) {
+						raise_errorf("`watchlist()` return value is not iterable");
+					} else {
+						PyObject* item;
+						arrsetlen(g.watch_paths_arr, 0);
+						while ((item = PyIter_Next(it)) != NULL) {
+							const char* item_cstr = PyUnicode_AsUTF8(item);
+							if (item_cstr != NULL) {
+								watch_file(item_cstr);
+							}
+							Py_DECREF(item);
 						}
-
-						Py_DECREF(item);
+						Py_DECREF(it);
 					}
-					Py_DECREF(it);
+					Py_DECREF(pr);
 				}
-				Py_DECREF(pr);
+			}
+			Py_DECREF(pfn);
+		}
+	}
+
+	if (g.python_initialized) {
+		PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "viewlist");
+		if (pfn == NULL) {
+			raise_errorf("`viewlist` does not exist");
+		} else {
+			if (!PyCallable_Check(pfn)) {
+				raise_errorf("`viewlist` is not callable");
+			} else {
+				PyObject* pr = PyObject_CallObject(pfn, NULL);
+				if (pr == NULL) {
+					raise_errorf("`viewlist()` failed");
+				} else {
+					PyObject* it = PyObject_GetIter(pr);
+					if (it == NULL) {
+						raise_errorf("`viewlist()` return value is not iterable");
+					} else {
+						PyObject* item;
+						while ((item = PyIter_Next(it)) != NULL) {
+							PyObject* name = PyObject_GetAttrString(item, "name");
+							PyObject* dim = PyObject_GetAttrString(item, "dim");
+							if (name != NULL && dim != NULL) {
+								long dimlong = PyLong_AsLong(dim);
+								// TODO
+								printf("viewlist item name=[%s] dim=%ld\n",
+										PyUnicode_AsUTF8(name),
+										dimlong);
+							}
+							Py_XDECREF(dim);
+							Py_XDECREF(name);
+							Py_DECREF(item);
+						}
+						Py_DECREF(it);
+					}
+					Py_DECREF(pr);
+				}
 			}
 		}
-		Py_DECREF(pfn);
 	}
 
 	g.duration_load = timer_end(t0);
@@ -621,12 +700,6 @@ static void view_free(struct view* v)
 {
 	glDeleteProgram(v->prg0);
 	free((void*)v->name);
-}
-
-static void lua_api_error(const char* msg)
-{
-	g.has_error = true;
-	snprintf(g.error_message, sizeof g.error_message, "[API ERROR] %s", msg);
 }
 
 static void open_view_window(struct view* view)

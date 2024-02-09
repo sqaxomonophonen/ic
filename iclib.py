@@ -1,4 +1,5 @@
 import os, sys
+from collections import namedtuple
 
 def watchlist():
 	home = os.path.dirname(os.path.realpath(__file__))
@@ -11,8 +12,19 @@ def watchlist():
 	return fs
 #print(watchlist())
 
+_views = []
+_viewset = set()
+def viewlist(): return _views
+
+_View = namedtuple("_View", ["dim", "name", "fn"])
+
 def _register_view(dim, fn):
-	#print("register", dim, fn.__name__)
+	name = fn.__name__
+	assert name not in _viewset, ""
+	_viewset.add(name)
+	_views.append(_View(dim=dim, name=name, fn=fn))
+	#print(_viewset)
+	#print(_views)
 	return fn
 
 def view2d(fn): return _register_view(2,fn)
