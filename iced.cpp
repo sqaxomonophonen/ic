@@ -538,6 +538,7 @@ static void reload_script(void)
 					Py_DECREF(pr);
 				}
 			}
+			Py_DECREF(pfn);
 		}
 	}
 
@@ -736,10 +737,35 @@ static void window_main(void)
 				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.7f, 1.0f), "%s", g.error_message);
 			}
 
+			char gc[1<<12];
+			if (!g.python_initialized || g.python_iclib_module == NULL) {
+				snprintf(gc, sizeof gc, "N/A");
+			} else {
+				PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "gcreport");
+				if (pfn == NULL) {
+					snprintf(gc, sizeof gc, "iclib.gcreport() is missing");
+				} else {
+					if (!PyCallable_Check(pfn)) {
+						raise_errorf("iclib.gcreport exists but is not callable");
+					} else {
+						PyObject* pr = PyObject_CallObject(pfn, NULL);
+						if (pr == NULL) {
+							raise_errorf("iclib.gcreport() did not return a string");
+						} else {
+							snprintf(gc, sizeof gc, "%s", PyUnicode_AsUTF8(pr));
+							Py_DECREF(pr);
+						}
+					}
+					Py_DECREF(pfn);
+				}
+			}
+
 			ImGui::SeparatorText("Status");
-			ImGui::Text("Load: %fs\nCall: %fs",
+			ImGui::Text("Load: %fs\nCall: %fs\nGC: %s",
 				g.duration_load,
-				g.duration_call);
+				g.duration_call,
+				gc);
+
 			if (ImGui::Button("Soft Reload")) {
 				reload_script();
 			}

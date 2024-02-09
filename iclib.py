@@ -1,5 +1,8 @@
 import os, sys
+import gc
 from collections import namedtuple
+
+def gcreport(): return repr(gc.get_count())
 
 def watchlist():
 	home = os.path.dirname(os.path.realpath(__file__))
