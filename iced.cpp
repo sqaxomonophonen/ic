@@ -398,15 +398,14 @@ static void reload_script(void)
 	assert(clock_gettime(CLOCK_REALTIME, &g.last_load_time) == 0);
 	//dump_timespec(&g.last_load_time);
 
-	arrsetlen(g.watch_paths_arr, 0);
+	g.has_error = false;
 	g.duration_load = 0;
 	g.duration_call = 0;
 
-
 	const bool must_init = !g.python_initialized || g.python_do_reinitialize;
+	g.python_do_reinitialize = false;
 	struct timespec t0 = timer_begin();
 	if (must_init && g.python_initialized) {
-		printf("py fini\n");
 		assert(!(Py_FinalizeEx() < 0));
 		g.python_initialized = false;
 	}
@@ -441,6 +440,7 @@ static void reload_script(void)
 		if (PyCallable_Check(pfn)) {
 			PyObject* pr = PyObject_CallObject(pfn, NULL);
 			if (pr != NULL) {
+				arrsetlen(g.watch_paths_arr, 0);
 				PyObject* it = PyObject_GetIter(pr);
 				PyObject* item;
 				while ((item = PyIter_Next(it)) != NULL) {
@@ -487,7 +487,6 @@ static void check_for_reload(void)
 	}
 	if (!reload) return;
 
-	g.has_error = false;
 	reload_script();
 }
 
@@ -666,6 +665,14 @@ static void window_main(void)
 			ImGui::Text("Load: %fs\nCall: %fs",
 				g.duration_load,
 				g.duration_call);
+			if (ImGui::Button("Soft Reload")) {
+				reload_script();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Hard")) {
+				g.python_do_reinitialize = true;
+				reload_script();
+			}
 		}
 		ImGui::End();
 	}
