@@ -7,6 +7,9 @@
 #include <time.h>
 #include <stdint.h>
 
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
 #include "imgui.h"
 #include "util.h"
 #include "iced.h"
@@ -21,6 +24,14 @@ static uint64_t next_serial(void)
 
 bool has_glsl_error;
 static char glsl_error[1<<13];
+
+static char* cstrdup(const char* s)
+{
+	const size_t n = strlen(s)+1;
+	char* s2 = (char*)malloc(n);
+	memcpy(s2, s, n);
+	return s2;
+}
 
 static void check_shader(GLuint shader, GLenum type, int n_sources, const char** sources)
 {
@@ -202,6 +213,9 @@ static char* read_file(const char* path, size_t* out_size)
 #endif
 
 static struct globals {
+	bool python_initialized;
+	bool python_do_reinitialize;
+	PyObject* python_world_module;
 	bool has_error;
 	char error_message[1<<14];
 	char* watch_paths_arr;
@@ -367,7 +381,9 @@ static void reload_view(struct view* view)
 			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
 			g.has_error = true;
 		} else {
-			if (view->prg0) glDeleteProgram(view->prg0); CHKGL;
+			if (view->prg0) {
+				glDeleteProgram(view->prg0); CHKGL;
+			}
 			view->prg0 = new_prg;
 			view->serial = next_serial();
 		}
@@ -386,7 +402,65 @@ static void reload_script(void)
 	g.duration_load = 0;
 	g.duration_call = 0;
 
-	// TODO
+
+	const bool must_init = !g.python_initialized || g.python_do_reinitialize;
+	struct timespec t0 = timer_begin();
+	if (must_init && g.python_initialized) {
+		printf("py fini\n");
+		assert(!(Py_FinalizeEx() < 0));
+		g.python_initialized = false;
+	}
+
+	if (must_init) {
+		assert(!g.python_initialized);
+		Py_Initialize();
+		g.python_initialized = true;
+		PyRun_SimpleString(
+			"import sys\n"
+			"sys.path.insert(0,'')\n" // ensure local modules can be imported
+		);
+	}
+
+	assert(g.python_initialized);
+
+	if (must_init) {
+		PyObject* pn = PyUnicode_DecodeFSDefault("world");
+		g.python_world_module = PyImport_Import(pn);
+		Py_DECREF(pn);
+	} else {
+		g.python_world_module = PyImport_ReloadModule(g.python_world_module);
+	}
+	if (g.python_world_module == NULL) {
+		PyErr_Print();
+		fprintf(stderr, "ERROR: import failed\n");
+		g.python_initialized = false;
+	}
+
+	PyObject* pfn = PyObject_GetAttrString(g.python_world_module, "watchlist");
+	if (pfn != NULL) {
+		if (PyCallable_Check(pfn)) {
+			PyObject* pr = PyObject_CallObject(pfn, NULL);
+			if (pr != NULL) {
+				PyObject* it = PyObject_GetIter(pr);
+				PyObject* item;
+				while ((item = PyIter_Next(it)) != NULL) {
+					PyObject* item_str = PyUnicode_AsEncodedString(item, "utf-8", "Error ~");
+					if (item_str != NULL) {
+						char* item_cstr = PyBytes_AS_STRING(item_str);
+						watch_file(item_cstr);
+						Py_DECREF(item_str);
+					}
+
+					Py_DECREF(item);
+				}
+				Py_DECREF(it);
+				Py_DECREF(pr);
+			}
+		}
+		Py_DECREF(pfn);
+	}
+
+	g.duration_load = timer_end(t0);
 
 	for (int i = 0; i < arrlen(view_arr); i++) {
 		struct view* view = &view_arr[i];
@@ -552,14 +626,6 @@ static void lua_api_error(const char* msg)
 {
 	g.has_error = true;
 	snprintf(g.error_message, sizeof g.error_message, "[API ERROR] %s", msg);
-}
-
-static char* cstrdup(const char* s)
-{
-	const size_t n = strlen(s)+1;
-	char* s2 = (char*)malloc(n);
-	memcpy(s2, s, n);
-	return s2;
 }
 
 static void open_view_window(struct view* view)

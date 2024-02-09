@@ -3,10 +3,12 @@ CXXFLAGS+=-std=c++11
 LDLIBS+=-lm -pthread
 CXXFLAGS+=-O0 -g
 
-
 PKGS=sdl2 gl
 CXXFLAGS+=$(shell pkg-config --cflags ${PKGS})
 LDLIBS+=$(shell pkg-config --libs ${PKGS})
+
+CXXFLAGS+=$(shell python3.10-config --includes)
+LDLIBS+=$(shell python3.10-config --ldflags --embed)
 
 CXXFLAGS+=-I./imgui
 LDLIBS+=-L./imgui -limgui

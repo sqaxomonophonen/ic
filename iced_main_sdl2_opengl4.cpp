@@ -11,6 +11,9 @@
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_opengl4.h"
 
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+
 #include "util.h"
 
 #include "iced.h"
@@ -40,6 +43,13 @@ void fly_enable(bool enable)
 
 int main(int argc, char** argv)
 {
+	wchar_t* program = Py_DecodeLocale(argv[0], NULL);
+	if (program == NULL) {
+		fprintf(stderr, "Fatal error: cannot decode argv[0]\n");
+		exit(1);
+	}
+	Py_SetProgramName(program);
+
 	assert(SDL_Init(SDL_INIT_TIMER | SDL_INIT_VIDEO) == 0);
 	atexit(SDL_Quit);
 
@@ -180,6 +190,8 @@ int main(int argc, char** argv)
 			fly_enable(false);
 		}
 	}
+
+	PyMem_RawFree(program);
 
 	return EXIT_SUCCESS;
 }
