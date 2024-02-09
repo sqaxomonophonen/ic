@@ -440,20 +440,22 @@ static void reload_script(void)
 		if (PyCallable_Check(pfn)) {
 			PyObject* pr = PyObject_CallObject(pfn, NULL);
 			if (pr != NULL) {
-				arrsetlen(g.watch_paths_arr, 0);
 				PyObject* it = PyObject_GetIter(pr);
-				PyObject* item;
-				while ((item = PyIter_Next(it)) != NULL) {
-					PyObject* item_str = PyUnicode_AsEncodedString(item, "utf-8", "Error ~");
-					if (item_str != NULL) {
-						char* item_cstr = PyBytes_AS_STRING(item_str);
-						watch_file(item_cstr);
-						Py_DECREF(item_str);
-					}
+				if (it != NULL) {
+					PyObject* item;
+					arrsetlen(g.watch_paths_arr, 0);
+					while ((item = PyIter_Next(it)) != NULL) {
+						PyObject* item_str = PyUnicode_AsEncodedString(item, "utf-8", "Error ~");
+						if (item_str != NULL) {
+							char* item_cstr = PyBytes_AS_STRING(item_str);
+							watch_file(item_cstr);
+							Py_DECREF(item_str);
+						}
 
-					Py_DECREF(item);
+						Py_DECREF(item);
+					}
+					Py_DECREF(it);
 				}
-				Py_DECREF(it);
 				Py_DECREF(pr);
 			}
 		}
