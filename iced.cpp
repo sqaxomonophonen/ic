@@ -401,7 +401,50 @@ static void raise_errorf(const char* fmt, ...)
 	va_start(args, fmt);
 	vsnprintf(g.error_message, sizeof g.error_message, fmt, args);
 	g.has_error = true;
+	fprintf(stderr, "ERROR: %s\n", g.error_message);
 	va_end(args);
+}
+
+static void handle_python_error(void)
+{
+	if (PyErr_Occurred() == NULL) return;
+	//PyErr_Print();
+	PyObject* ptype;
+	PyObject* pvalue;
+	PyObject* ptraceback;
+	PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+	PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+	//PyErr_Display(ptype, pvalue, ptraceback);
+	//PyTraceBack_Print(ptraceback, pvalue);
+	raise_errorf("world/iclib-import failed");
+	if (pvalue != NULL) {
+		PyObject* pstr = PyObject_Str(pvalue);
+
+		PyObject* pn = PyUnicode_DecodeFSDefault("traceback");
+		PyObject* tb = PyImport_Import(pn);
+		Py_DECREF(pn);
+		assert((tb != NULL) && "expected to be able to import built-in module 'traceback'");
+
+		PyObject* fn = PyObject_GetAttrString(tb, "format_tb");
+		assert((fn != NULL)  && "expected built-in 'traceback.format_tb' to exist");
+
+		PyObject* call_args = PyTuple_New(1);
+		PyTuple_SetItem(call_args, 0, ptraceback);
+		PyObject* r = PyObject_CallObject(fn, call_args);
+
+		PyObject* empty = PyUnicode_DecodeFSDefault("");
+		PyObject* join = PyObject_GetAttrString(empty, "join");
+		PyObject* join_args = PyTuple_New(1);
+		PyTuple_SetItem(join_args, 0, r);
+		PyObject* rj = PyObject_CallObject(join, join_args);
+
+		raise_errorf("world-import failed:\n%s\n%s", PyUnicode_AsUTF8(pstr), PyUnicode_AsUTF8(rj));
+
+		Py_DECREF(tb);
+		PyErr_Restore(ptype, pvalue, ptraceback);
+	}
+	PyErr_Clear();
+	g.python_initialized = false;
 }
 
 static void reload_script(void)
@@ -449,22 +492,7 @@ static void reload_script(void)
 		}
 	}
 	if (g.python_world_module == NULL || g.python_iclib_module == NULL) {
-		//PyErr_Print();
-		PyObject* ptype;
-		PyObject* pvalue;
-		PyObject* ptraceback;
-		PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-		raise_errorf("world/iclib-import failed");
-		if (pvalue != NULL) {
-			PyObject* pstr = PyObject_Str(pvalue);
-			if (pstr) {
-				const char* err_msg = PyUnicode_AsUTF8(pstr);
-				raise_errorf("world-import failed: %s", err_msg);
-				Py_DECREF(pstr);
-			}
-			PyErr_Restore(ptype, pvalue, ptraceback);
-		}
-		g.python_initialized = false;
+		handle_python_error();
 		fprintf(stderr, "ERROR: import failed\n");
 	}
 
@@ -765,19 +793,8 @@ static void window_main(void)
 										const char* view_str = PyUnicode_AsUTF8(name);
 										snprintf(buf, sizeof buf, "[%ldD] %s", PyLong_AsLong(dim), view_str);
 										if (ImGui::Button(buf)) {
-											PyObject* pfn2 = PyObject_GetAttrString(item, "fn");
-											if (pfn2 == NULL) {
-												raise_errorf("view [%s] has no `fn`", view_str);
-											} else {
-												if (!PyCallable_Check(pfn2)) {
-													raise_errorf("view [%s] has `fn` but it is not callable", view_str);
-												} else {
-													PyObject_CallObject(pfn2, NULL);
-													printf("TODO\n"); // TODO
-
-												}
-												Py_DECREF(pfn2);
-											}
+											PyObject_CallObject(item, NULL);
+											handle_python_error();
 										}
 									}
 									Py_XDECREF(dim);

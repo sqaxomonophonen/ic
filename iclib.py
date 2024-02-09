@@ -1,6 +1,5 @@
 import os, sys
 import gc
-from collections import namedtuple
 
 def gcreport(): return repr(gc.get_count()) # XXX not sure this is reliable; I see static counts even though I deliberately "leak" objects?
 
@@ -19,19 +18,68 @@ _views = []
 _viewset = set()
 def viewlist(): return _views
 
-_View = namedtuple("_View", ["dim", "name", "fn"])
+_active_codegen = None
+class _Codegen:
+	def __init__(self):
+		self.define_set = set()
+		self.defines = []
+		self.lines = []
+		self.ident_serials = {}
+		self.const_map = {}
 
-def _register_view(dim, fn):
-	name = fn.__name__
-	assert name not in _viewset, ""
+	def defined(self, name):
+		return name in self.define_set
+
+	def define(self, name, src):
+		self.define_set.add(name)
+		self.defines.append(src)
+
+	def done(self):
+		pass
+
+	def line(self, line):
+		self.lines.append(line)
+
+	def ident(self, prefix):
+		if prefix not in self.ident_serials:
+			self.ident_serials[prefix] = -1
+		self.ident_serials[prefix] += 1
+		return "%s%d" % (prefix, self.ident_serials[prefix])
+
+	def constant(self, typ, literal):
+		if literal not in self.const_map:
+			i = self.ident("c")
+			self.line("\t%s %s = %s;" % (typ, i, literal))
+			self.const_map[literal] = i
+		return self.const_map[literal]
+
+def _cg():
+	assert _active_codegen is not None, "codegen attempted outside of codegen scope"
+	return _active_codegen
+
+class _View:
+	def __init__(self, dim, name, ctor):
+		self.dim = dim
+		self.name = name
+		self.ctor = ctor
+
+	def __call__(self):
+		global _active_codegen
+		_active_codegen = _Codegen()
+		self.ctor()
+		_active_codegen.done()
+		_active_codegen = None
+
+def _register_view(dim, ctor):
+	name = ctor.__name__
+	assert name not in _viewset, "view %s is already defined" % name
 	_viewset.add(name)
-	_views.append(_View(dim=dim, name=name, fn=fn))
-	#print(_viewset)
-	#print(_views)
-	return fn
+	view = _View(dim, name, ctor)
+	_views.append(view)
+	return view
 
-def view2d(fn): return _register_view(2,fn)
-def view3d(fn): return _register_view(3,fn)
+def view2d(ctor): return _register_view(2,ctor)
+def view3d(ctor): return _register_view(3,ctor)
 
 # allow chains of _Scope nodes
 class chain:
@@ -58,13 +106,24 @@ class _NoArgScope:
 	def __exit__(self,type,value,tb):
 		self.i.__exit__(type,value,tb)
 
-	def __call__(self): return self.v()
+	def __call__(self):
+		return self.v()
 
-_isnum = lambda v: isinstance(v,(float,int))
-_isvec = lambda n,v: (len(v)==n) and (False not in [_isnum(x) for x in v])
+_isnum  = lambda v: isinstance(v,(float,int))
+_isvecn = lambda n,v: (len(v)==n) and (False not in [_isnum(x) for x in v])
 
 class _Node:
 	argfmt = ""
+
+	def resolv(self, fn):
+		n = "glsl_%s" % fn
+		if not hasattr(self, n): return None
+		r = "%s_%s" % (self.name(), fn)
+		cg = _cg()
+		if not cg.defined(r):
+			cg.define(r, getattr(self, n)() % {"fn": r})
+		return r
+
 	def __init__(self, *args):
 		#print(self.name(), args, "argfmt", self.argfmt)
 		argfmt = self.argfmt
@@ -80,16 +139,39 @@ class _Node:
 			if c == "1":
 				assert _isnum(a), "argument %d not a number" % i
 			elif c == "2":
-				assert _isvec(2,a), "argument %d not a vec2" % i
+				assert _isvecn(2,a), "argument %d not a vec2" % i
 			elif c == "3":
-				assert _isvec(3,a), "argument %d not a vec3" % i
+				assert _isvecn(3,a), "argument %d not a vec3" % i
 			elif c == "4":
-				assert _isvec(4,a), "argument %d not a vec4" % i
+				assert _isvecn(4,a), "argument %d not a vec4" % i
 			else:
 				raise RuntimeError("unhandled argfmt char %s" % repr(c))
 		self.args = args
 
-	def name(self): return self.__class__.__name__
+		p22 = self.resolv("p22")
+		p33 = self.resolv("p33")
+		p2d1 = self.resolv("p2d1")
+		p3d1 = self.resolv("p3d1")
+		is_2d = p22 or p2d1
+		is_3d = p33 or p3d1
+		assert not (is_2d and is_3d)
+
+		print(p22,p33,p2d1,p3d1)
+
+		if p22 is not None:
+			pass
+
+		if p33 is not None:
+			pass
+
+		if p2d1 is not None:
+			pass
+
+		if p3d1 is not None:
+			pass
+
+	def name(self):
+		return self.__class__.__name__
 
 class _Scope(_Node):
 	def __enter__(self):
