@@ -222,7 +222,7 @@ static struct globals {
 	char* watch_paths_arr;
 	struct timespec last_load_time;
 	double duration_load;
-	double duration_call;
+	double duration_exec;
 	GLuint vao0;
 } g;
 
@@ -372,6 +372,7 @@ static void handle_python_error(void)
 
 static void reload_view(struct view* view)
 {
+	struct timespec t0 = timer_begin();
 	PyObject* pview = PyObject_GetAttrString(g.python_world_module, view->name);
 	PyObject* r = PyObject_CallObject(pview, NULL);
 	Py_DECREF(pview);
@@ -381,8 +382,8 @@ static void reload_view(struct view* view)
 	}
 	PyObject* psource = PyObject_GetAttrString(r, "source");
 	Py_DECREF(r);
-
 	const char* source = PyUnicode_AsUTF8(psource);
+	g.duration_exec = timer_end(t0);
 
 	if (view->dim == 2) {
 		const char* sources[] = {
@@ -467,7 +468,7 @@ static void reload_script(void)
 
 	g.has_error = false;
 	g.duration_load = 0;
-	g.duration_call = 0;
+	g.duration_exec = 0;
 
 	const bool must_init = !g.python_initialized || g.python_do_reinitialize;
 	g.python_do_reinitialize = false;
@@ -785,9 +786,9 @@ static void window_main(void)
 			}
 
 			ImGui::SeparatorText("Status");
-			ImGui::Text("Load: %fs\nCall: %fs\nGC: %s",
+			ImGui::Text("Load: %fs\nExec: %fs\nGC: %s",
 				g.duration_load,
-				g.duration_call,
+				g.duration_exec,
 				gc);
 
 			if (ImGui::Button("Soft Reload")) {
