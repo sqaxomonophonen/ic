@@ -318,83 +318,6 @@ static struct view_window* view_window_arr;
 #define IS_Q2 "(gl_VertexID == 2 || gl_VertexID == 4)"
 #define IS_Q3 "(gl_VertexID == 5)"
 
-static void reload_view(struct view* view)
-{
-	const char* glsl_src = "XXX"; // XXX
-	if (view->dim == 2) {
-		const char* sources[] = {
-
-			// vertex
-			"#version 460\n"
-			"\n"
-			"layout (location = 0) uniform vec2 u_p0;\n"
-			"layout (location = 1) uniform vec2 u_p1;\n"
-			"\n"
-			"out vec2 v_pos;\n"
-			"\n"
-			"void main()\n"
-			"{\n"
-			"	vec2 c;\n"
-			"	if (" IS_Q0 ") {\n"
-			"		c = vec2(-1.0, -1.0);\n"
-			"		v_pos = vec2(u_p0.x, u_p0.y);\n"
-			"	} else if (" IS_Q1 ") {\n"
-			"		c = vec2( 1.0, -1.0);\n"
-			"		v_pos = vec2(u_p1.x, u_p0.y);\n"
-			"	} else if (" IS_Q2 ") {\n"
-			"		c = vec2( 1.0,  1.0);\n"
-			"		v_pos = vec2(u_p1.x, u_p1.y);\n"
-			"	} else if (" IS_Q3 ") {\n"
-			"		c = vec2(-1.0,  1.0);\n"
-			"		v_pos = vec2(u_p0.x, u_p1.y);\n"
-			"	}\n"
-			"	gl_Position = vec4(c,0.0,1.0);\n"
-			"}\n"
-			,
-
-			// fragment
-			"#version 460\n"
-			"\n"
-			,
-			glsl_src
-			,
-			"\n"
-			"in vec2 v_pos;\n"
-			"\n"
-			"layout (location = 0) out vec4 frag_color;\n"
-			"\n"
-			"void main()\n"
-			"{\n"
-			"	float d = map(v_pos);\n"
-			"	float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;\n"
-			"	float m2 = max(0.0, 1.0 - abs(d*0.03));\n"
-			"	m2 = m2*m2*m2;\n"
-			"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2*m2, 0.3*m2, 0.4);\n"
-			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
-			"	float cc = cos(d*3.0);\n"
-			"	cc = cc*cc*cc*cc*cc*cc*cc*cc*cc;\n"
-			"	c += cc * a0;\n"
-			"	frag_color = vec4(m*c, 1.0);\n"
-			"}\n"
-		};
-
-		GLuint new_prg = mk_render_program(1, 3, sources);
-		if (has_glsl_error) {
-			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
-			g.has_error = true;
-		} else {
-			if (view->prg0) {
-				glDeleteProgram(view->prg0); CHKGL;
-			}
-			view->prg0 = new_prg;
-			view->serial = next_serial();
-		}
-
-	} else if (view->dim == 3) {
-		assert(!"TODO 3D"); // XXX
-	}
-}
-
 static void raise_errorf(const char* fmt, ...)
 {
 	va_list args;
@@ -445,6 +368,96 @@ static void handle_python_error(void)
 	}
 	PyErr_Clear();
 	g.python_initialized = false;
+}
+
+static void reload_view(struct view* view)
+{
+	PyObject* pview = PyObject_GetAttrString(g.python_world_module, view->name);
+	PyObject* r = PyObject_CallObject(pview, NULL);
+	Py_DECREF(pview);
+	if (r == NULL) {
+		handle_python_error();
+		return;
+	}
+	PyObject* psource = PyObject_GetAttrString(r, "source");
+	Py_DECREF(r);
+
+	const char* source = PyUnicode_AsUTF8(psource);
+
+	if (view->dim == 2) {
+		const char* sources[] = {
+
+			// vertex
+			"#version 460\n"
+			"\n"
+			"layout (location = 0) uniform vec2 u_p0;\n"
+			"layout (location = 1) uniform vec2 u_p1;\n"
+			"\n"
+			"out vec2 v_pos;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	vec2 c;\n"
+			"	if (" IS_Q0 ") {\n"
+			"		c = vec2(-1.0, -1.0);\n"
+			"		v_pos = vec2(u_p0.x, u_p0.y);\n"
+			"	} else if (" IS_Q1 ") {\n"
+			"		c = vec2( 1.0, -1.0);\n"
+			"		v_pos = vec2(u_p1.x, u_p0.y);\n"
+			"	} else if (" IS_Q2 ") {\n"
+			"		c = vec2( 1.0,  1.0);\n"
+			"		v_pos = vec2(u_p1.x, u_p1.y);\n"
+			"	} else if (" IS_Q3 ") {\n"
+			"		c = vec2(-1.0,  1.0);\n"
+			"		v_pos = vec2(u_p0.x, u_p1.y);\n"
+			"	}\n"
+			"	gl_Position = vec4(c,0.0,1.0);\n"
+			"}\n"
+			,
+
+			// fragment
+			"#version 460\n"
+			"\n"
+			,
+			source
+			,
+			"\n"
+			"in vec2 v_pos;\n"
+			"\n"
+			"layout (location = 0) out vec4 frag_color;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	float d = map(v_pos);\n"
+			"	float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;\n"
+			"	float m2 = max(0.0, 1.0 - abs(d*0.03));\n"
+			"	m2 = m2*m2*m2;\n"
+			"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2*m2, 0.3*m2, 0.4);\n"
+			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
+			"	float cc = cos(d*3.0);\n"
+			"	cc = cc*cc*cc*cc*cc*cc*cc*cc*cc;\n"
+			"	c += cc * a0;\n"
+			"	frag_color = vec4(m*c, 1.0);\n"
+			"}\n"
+		};
+
+		GLuint new_prg = mk_render_program(1, 3, sources);
+		if (has_glsl_error) {
+			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
+			g.has_error = true;
+		} else {
+			if (view->prg0) {
+				glDeleteProgram(view->prg0); CHKGL;
+			}
+			view->prg0 = new_prg;
+			view->serial = next_serial();
+		}
+
+	} else if (view->dim == 3) {
+		assert(!"TODO 3D"); // XXX
+	}
+
+	Py_DECREF(psource);
 }
 
 static void reload_script(void)
@@ -715,6 +728,27 @@ static void open_view_window(struct view* view)
 	arrput(view_window_arr, vw);
 }
 
+static void open_view(const char* name, int dim)
+{
+	const int n = arrlen(view_arr);
+	for (int i = 0; i < n; i++) {
+		struct view* view = &view_arr[i];
+		if (strcmp(view->name, name) == 0) {
+			open_view_window(view);
+			return;
+		}
+	}
+
+	struct view view = {0};
+	view.name = cstrdup(name);
+	view.dim = dim;
+	reload_view(&view);
+	if (!g.has_error) {
+		arrput(view_arr, view);
+		open_view_window(&view);
+	}
+}
+
 static const ImVec4 errtxt = ImVec4(1.0f, 0.7f, 0.7f, 1.0f);
 
 static void window_main(void)
@@ -786,23 +820,19 @@ static void window_main(void)
 							} else {
 								PyObject* item;
 								while ((item = PyIter_Next(it)) != NULL) {
-									PyObject* name = PyObject_GetAttrString(item, "name");
-									PyObject* dim = PyObject_GetAttrString(item, "dim");
-									if (name != NULL && dim != NULL) {
+									PyObject* pname = PyObject_GetAttrString(item, "name");
+									PyObject* pdim = PyObject_GetAttrString(item, "dim");
+									if (pname != NULL && pdim != NULL) {
 										char buf[1<<12];
-										const char* view_str = PyUnicode_AsUTF8(name);
-										snprintf(buf, sizeof buf, "[%ldD] %s", PyLong_AsLong(dim), view_str);
+										const char* name_str = PyUnicode_AsUTF8(pname);
+										int dim = PyLong_AsLong(pdim);
+										snprintf(buf, sizeof buf, "[%dD] %s", dim, name_str);
 										if (ImGui::Button(buf)) {
-											PyObject* r = PyObject_CallObject(item, NULL);
-											if (r == NULL) {
-												handle_python_error();
-											} else {
-												// TODO
-											}
+											open_view(name_str, dim);
 										}
 									}
-									Py_XDECREF(dim);
-									Py_XDECREF(name);
+									Py_XDECREF(pdim);
+									Py_XDECREF(pname);
 									Py_DECREF(item);
 								}
 								Py_DECREF(it);

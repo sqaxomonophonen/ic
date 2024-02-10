@@ -113,6 +113,10 @@ def _cg():
 	assert _active_codegen is not None, "codegen attempted outside of codegen scope"
 	return _active_codegen
 
+class _ViewGen:
+	def __init__(self, source):
+		self.source = source
+
 class _View:
 	def __init__(self, dim, name, ctor):
 		self.dim = dim
@@ -127,7 +131,7 @@ class _View:
 		_active_codegen.leave()
 		source = _active_codegen.source()
 		_active_codegen = None
-		print(source)
+		return _ViewGen(source)
 
 def _register_view(dim, ctor):
 	name = ctor.__name__
