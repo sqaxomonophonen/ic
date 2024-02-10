@@ -40,6 +40,14 @@ class _Codegen:
 		self.define_set = set()
 		self.defines = []
 		self.fns = []
+		self.onceset = set()
+
+	def once(self, x):
+		if x in self.onceset:
+			return False
+		else:
+			self.onceset.add(x)
+			return True
 
 	def push(self, node):
 		self.stack.append(node)
@@ -172,15 +180,14 @@ class _Node:
 
 	@classmethod
 	def typd(t):
-		if hasattr(t, "_typd"): return
-		t._typd = 1
+		cg = _cg()
+		if not cg.once(t): return
 
 		n_resolved = 0
 		def resolv(fn):
 			nam = "glsl_%s" % fn
 			if not hasattr(t, nam): return None
 			r = "%s_%s" % (t.nname(), fn)
-			cg = _cg()
 			if not cg.defined(r):
 				cg.define(r, _untab(getattr(t, nam) % {"fn": r}))
 				nonlocal n_resolved
@@ -207,15 +214,15 @@ class _Node:
 		if not hasattr(self, "dvar"):
 			self.dvar = dvar1
 			return
-		dvar1 = cg.ident("d")
+		dvar2 = cg.ident("d")
 		type(self).typd()
 		if self.fn_d21:
-			cg.line("\tfloat %s = %s(%s, %s%s);" % (dvar1, self.fn_d21, self.dvar, dvar1, self.glsl_argstr))
+			cg.line("\tfloat %s = %s(%s, %s%s);" % (dvar2, self.fn_d21, self.dvar, dvar1, self.glsl_argstr))
 		else:
 			u = union.v
 			u.typd()
-			cg.line("\tfloat %s = %s(%s, %s);" % (dvar1, u.fn_d21, self.dvar, dvar1))
-		self.dvar = dvar1
+			cg.line("\tfloat %s = %s(%s, %s);" % (dvar2, u.fn_d21, self.dvar, dvar1))
+		self.dvar = dvar2
 
 	def __init__(self):
 		pass
@@ -302,8 +309,8 @@ class _Scope(_Node):
 		cg.pop()
 		if self.fn_d11 and hasattr(self, "dvar"):
 			dvar1 = cg.ident("d")
-			cg.line("\tfloat %s = %s(%s%s);", dvar1, self.fn_d11, self.dvar, self.glsl_argstr)
-			self.rjoin(dvar1)
+			cg.line("\tfloat %s = %s(%s%s);" % (dvar1, self.fn_d11, self.dvar, self.glsl_argstr))
+			self.dvar = dvar1
 		if hasattr(self, "dvar"):
 			cg.top().rjoin(self.dvar)
 
@@ -331,7 +338,7 @@ class scale2(_Scope):
 	}
 	"""
 	glsl_d11 = """
-	float %(fn)s(vec2 _p, float d, float s)
+	float %(fn)s(float d, float s)
 	{
 		return d*s;
 	}
