@@ -32,6 +32,7 @@ _viewset = set()
 def viewlist(): return _views
 
 _active_codegen = None
+_active_mset = None
 class _Codegen:
 	def __init__(self):
 		self.define_set = set()
@@ -131,6 +132,40 @@ class _ViewGen:
 	def __init__(self, source):
 		self.source = source
 
+class MaterialSet:
+	ff = [
+		("albedo", "vec3"),
+	]
+	def __init__(self, z):
+		self.z = z
+
+	def empty(self):
+		return len(self.z) == 0
+
+	def mktype(self):
+		fields = ""
+		for (nam,typ) in self.ff:
+			if nam in self.z: fields += ("\t%s %s;\n" % (typ, nam))
+		return "struct Material {\n" + fields + "};\n"
+
+	def format(self, material):
+		s = "Material("
+		for (nam,typ) in self.ff:
+			if not nam in self.z: continue
+			a = None
+			if hasattr(material, nam):
+				a = getattr(material, nam)
+
+			if typ == "vec3":
+				x = "vec3(0.0,0.0,0.0)"
+				if a is not None:
+					x = "vec3(%f,%f,%f)" % a
+				s += x
+			else:
+				assert False, "no handler for typ=%s" % typ
+		s += ")"
+		return s
+
 class _View:
 	def __init__(self, dim, name, ctor):
 		self.dim = dim
@@ -139,20 +174,18 @@ class _View:
 
 	def __call__(self):
 		_wpp_flush()
-		global _active_codegen
+		global _active_codegen, _active_mset
 		_active_codegen = _Codegen()
-		_active_codegen.define("Material", _untab(
-		"""
-		struct Material {
-			vec3 albedo;
-		};
-		"""))
+		_active_mset = MaterialSet(set(("albedo",)))
+		if not _active_mset.empty():
+			_active_codegen.define("Material", _active_mset.mktype())
 		_active_codegen.enter_map("map", self.dim)
 		self.ctor()
 		_active_codegen.leave()
 		source = _active_codegen.source()
 		print(source)
 		_active_codegen = None
+		_active_mset = None
 		return _ViewGen(source)
 
 def _register_view(dim, ctor):
@@ -310,7 +343,7 @@ class _Node:
 		self.pvar = top.pvar
 		self.dim = top.dim
 
-		if hasattr(self, "mdef"): self.mdef()
+		if not _active_mset.empty() and hasattr(self, "mdef"): self.mdef(_active_mset)
 
 		if self.fn_tx:
 			pvar1 = cg.ident("p");
@@ -366,8 +399,8 @@ class Material(_Scope):
 		super().__init_subclass__(**kwargs)
 		_wpp_todo.append(subcls) # magic via _WithWithoutParentheses
 
-	def mdef(self):
-		self.mvar = _cg().constant("Material", "Material(vec3(%f,%f,%f))" % (self.albedo))
+	def mdef(self, mset):
+		self.mvar = _cg().constant("Material", mset.format(self))
 
 ##############################################################################
 
