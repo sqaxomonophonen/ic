@@ -1,5 +1,4 @@
 import os, sys
-#from collections import namedtuple
 import gc
 
 def _untab(txt):
@@ -31,8 +30,6 @@ def watchlist():
 _views = []
 _viewset = set()
 def viewlist(): return _views
-
-#_RootNode = namedtuple("_RootNode", ['pvar', 'dim'])
 
 _active_codegen = None
 class _Codegen:
@@ -74,6 +71,8 @@ class _Codegen:
 	def leave(self):
 		assert len(self.stack) == 1, "expected stack to contain only root node"
 		top = _cg().top()
+		if hasattr(top, "mvar"):
+			self.line("\tout_material = %s;" % top.mvar)
 		if hasattr(top, "dvar"):
 			self.line("\treturn %s;" % top.dvar)
 		self.line("}")
@@ -86,7 +85,9 @@ class _Codegen:
 	def enter_map(self, fn, dim):
 		self.enter()
 		pvar = self.ident("p")
-		self.line("float %s(vec%d %s)" % (fn, dim, pvar))
+		mxtra = ""
+		mxtra = ", out Material out_material"
+		self.line("float %s(vec%d %s%s)" % (fn, dim, pvar, mxtra))
 		self.line("{")
 		self.push(_RootNode(pvar, dim))
 
@@ -140,10 +141,17 @@ class _View:
 		_wpp_flush()
 		global _active_codegen
 		_active_codegen = _Codegen()
+		_active_codegen.define("Material", _untab(
+		"""
+		struct Material {
+			vec3 albedo;
+		};
+		"""))
 		_active_codegen.enter_map("map", self.dim)
 		self.ctor()
 		_active_codegen.leave()
 		source = _active_codegen.source()
+		print(source)
 		_active_codegen = None
 		return _ViewGen(source)
 
@@ -228,21 +236,32 @@ class _Node:
 		t.is_leaf = bool(t.fn_map)
 		t.dim = (node_is_2d and 2) or (node_is_3d and 3) or 0
 
-	def rjoin(self, dvar1):
-		if not dvar1: return
+	def rjoin(self, o):
 		cg = _cg()
-		if not hasattr(self, "dvar"):
-			self.dvar = dvar1
-			return
-		dvar2 = cg.ident("d")
-		type(self).typd()
-		if self.fn_d21:
-			cg.line("\tfloat %s = %s(%s, %s%s);" % (dvar2, self.fn_d21, self.dvar, dvar1, self.glsl_argstr))
-		else:
-			u = union.v
-			u.typd()
-			cg.line("\tfloat %s = %s(%s, %s);" % (dvar2, u.fn_d21, self.dvar, dvar1))
-		self.dvar = dvar2
+		if hasattr(o, "dvar"):
+			dvar1 = o.dvar
+
+			if not hasattr(self, "dvar"):
+				self.dvar = dvar1
+			else:
+				dvar2 = cg.ident("d")
+				type(self).typd()
+				if self.fn_d21:
+					cg.line("\tfloat %s = %s(%s, %s%s);" % (dvar2, self.fn_d21, self.dvar, dvar1, self.glsl_argstr))
+				else:
+					u = union.v
+					u.typd()
+					cg.line("\tfloat %s = %s(%s, %s);" % (dvar2, u.fn_d21, self.dvar, dvar1))
+				self.dvar = dvar2
+
+			if hasattr(o, "mvar"):
+				mvar1 = o.mvar
+				if not hasattr(self, "mvar"):
+					self.mvar = mvar1
+				else:
+					mvar2 = cg.ident("m")
+					cg.line("\tMaterial %s = %s < %s ? %s : %s;" % (mvar2, self.dvar, dvar1, self.mvar, mvar1))
+					self.mvar = mvar2
 
 	def __init__(self):
 		pass
@@ -291,6 +310,8 @@ class _Node:
 		self.pvar = top.pvar
 		self.dim = top.dim
 
+		if hasattr(self, "mdef"): self.mdef()
+
 		if self.fn_tx:
 			pvar1 = cg.ident("p");
 			cg.line("\tvec%d %s = %s(%s%s);" % (self.dim, pvar1, self.fn_tx, self.pvar, glsl_argstr))
@@ -305,7 +326,7 @@ class _Node:
 
 		if self.is_leaf:
 			if hasattr(self, "dvar"):
-				top.rjoin(self.dvar)
+				top.rjoin(self)
 		else:
 			cg.push(self)
 
@@ -332,7 +353,7 @@ class _Scope(_Node):
 			cg.line("\tfloat %s = %s(%s%s);" % (dvar1, self.fn_d11, self.dvar, self.glsl_argstr))
 			self.dvar = dvar1
 		if hasattr(self, "dvar"):
-			cg.top().rjoin(self.dvar)
+			cg.top().rjoin(self)
 
 class _Leaf(_Node):
 	def __init__(self, *args):
@@ -340,11 +361,13 @@ class _Leaf(_Node):
 
 class Material(_Scope):
 	albedo = None
-	sdf2d = None
 	@classmethod
 	def __init_subclass__(subcls, **kwargs):
 		super().__init_subclass__(**kwargs)
-		_wpp_todo.append(subcls)
+		_wpp_todo.append(subcls) # magic via _WithWithoutParentheses
+
+	def mdef(self):
+		self.mvar = _cg().constant("Material", "Material(vec3(%f,%f,%f))" % (self.albedo))
 
 ##############################################################################
 
