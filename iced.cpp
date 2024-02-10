@@ -793,8 +793,12 @@ static void window_main(void)
 										const char* view_str = PyUnicode_AsUTF8(name);
 										snprintf(buf, sizeof buf, "[%ldD] %s", PyLong_AsLong(dim), view_str);
 										if (ImGui::Button(buf)) {
-											PyObject_CallObject(item, NULL);
-											handle_python_error();
+											PyObject* r = PyObject_CallObject(item, NULL);
+											if (r == NULL) {
+												handle_python_error();
+											} else {
+												// TODO
+											}
 										}
 									}
 									Py_XDECREF(dim);
