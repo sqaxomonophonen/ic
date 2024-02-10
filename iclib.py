@@ -169,8 +169,9 @@ class chain:
 	def __exit__(self,type,value,tb):
 		for x in reversed(self.xs): x.__exit__(type,value,tb)
 
-# used to make `with foo: ...` equivalent to `with foo(): ...`
-# see also _wpp_todo/_wpp_flush
+# used to make `with foo: ...` equivalent to `with foo(): ...`, either as an
+# annotation (@_WithWithoutParentheses), or as a subclass using
+# __init_subclass__/_wpp_todo/_wpp_flush
 class _WithWithoutParentheses:
 	def __init__(self, v):
 		self.v = v
