@@ -113,6 +113,19 @@ def _cg():
 	assert _active_codegen is not None, "codegen attempted outside of codegen scope"
 	return _active_codegen
 
+_wpp_todo = []
+def _wpp_flush():
+	# XXX monkey patching a _WithWithoutParentheses wrapper around classes that
+	# request it by adding themselves to _wpp_todo in __init_subclass__. after
+	# _wpp_flush() the class is replaced with an _WithWithoutParentheses
+	# instance.
+	global _wpp_todo
+	for w in _wpp_todo:
+		mod = sys.modules[w.__module__]
+		nam = w.__name__
+		setattr(mod, nam, _WithWithoutParentheses(w))
+	_wpp_todo = []
+
 class _ViewGen:
 	def __init__(self, source):
 		self.source = source
@@ -124,6 +137,7 @@ class _View:
 		self.ctor = ctor
 
 	def __call__(self):
+		_wpp_flush()
 		global _active_codegen
 		_active_codegen = _Codegen()
 		_active_codegen.enter_map("map", self.dim)
@@ -155,19 +169,20 @@ class chain:
 	def __exit__(self,type,value,tb):
 		for x in reversed(self.xs): x.__exit__(type,value,tb)
 
-
-# used to make `with union: ...` equivalent to `with union(): ...`
-class _NoArgScope:
+# used to make `with foo: ...` equivalent to `with foo(): ...`
+# see also _wpp_todo/_wpp_flush
+class _WithWithoutParentheses:
 	def __init__(self, v):
 		self.v = v
-		self.i = None
+		self.stack = []
 
 	def __enter__(self):
-		self.i = self.v()
-		self.i.__enter__()
+		i = self.v()
+		self.stack.append(i)
+		i.__enter__()
 
 	def __exit__(self,type,value,tb):
-		self.i.__exit__(type,value,tb)
+		self.stack.pop().__exit__(type,value,tb)
 
 	def __call__(self):
 		return self.v()
@@ -322,6 +337,15 @@ class _Leaf(_Node):
 	def __init__(self, *args):
 		self.exec(args)
 
+#_materials = []
+class Material(_Scope):
+	albedo = None
+	sdf2d = None
+	@classmethod
+	def __init_subclass__(subcls, **kwargs):
+		super().__init_subclass__(**kwargs)
+		_wpp_todo.append(subcls)
+
 ##############################################################################
 
 class translate2(_Scope):
@@ -357,7 +381,7 @@ class circle2(_Leaf):
 	}
 	"""
 
-@_NoArgScope
+@_WithWithoutParentheses
 class union(_Scope):
 	glsl_d21 = """
 	float %(fn)s(float d0, float d1)
@@ -367,7 +391,7 @@ class union(_Scope):
 	"""
 	# TODO join material
 
-@_NoArgScope
+@_WithWithoutParentheses
 class subtract(_Scope):
 	glsl_d21 = """
 	float %(fn)s(float d0, float d1)
@@ -376,7 +400,7 @@ class subtract(_Scope):
 	}
 	"""
 
-@_NoArgScope
+@_WithWithoutParentheses
 class intersect(_Scope):
 	glsl_d21 = """
 	float %(fn)s(float d0, float d1)
