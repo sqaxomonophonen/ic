@@ -258,7 +258,7 @@ class _Node:
 				mvar1 = o.mvar
 				if not hasattr(self, "mvar"):
 					self.mvar = mvar1
-				else:
+				elif self.mvar != mvar1:
 					mvar2 = cg.ident("m")
 					cg.line("\tMaterial %s = %s < %s ? %s : %s;" % (mvar2, self.dvar, dvar1, self.mvar, mvar1))
 					self.mvar = mvar2
