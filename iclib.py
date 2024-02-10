@@ -338,7 +338,6 @@ class _Leaf(_Node):
 	def __init__(self, *args):
 		self.exec(args)
 
-#_materials = []
 class Material(_Scope):
 	albedo = None
 	sdf2d = None
