@@ -219,10 +219,44 @@ class _View:
 		elif self.dim == 3:
 			_active_codegen.pushfn(_untab(
 			"""
+			vec3 calc_normal(vec3 p)
+			{
+				const float h = 0.001;
+				const vec2 k = vec2(1,-1);
+				Material _;
+				return normalize(
+					k.xyy * map(p + k.xyy*h, _) +
+					k.yyx * map(p + k.yyx*h, _) +
+					k.yxy * map(p + k.yxy*h, _) +
+					k.xxx * map(p + k.xxx*h, _) );
+			}
+
+			float pointlight(vec3 o, vec3 l)
+			{
+				vec3 d = normalize(l-o);
+				vec3 o2 = o + d*0.01;
+				vec3 pos;
+				float t = 0.0;
+				for (int i = 0; i < 32; i++) {
+					pos = o2 + t*d;
+					Material material;
+					float r = map(pos, material);
+					r = min(r, length(l-pos));
+					if (r<0.001) break;
+					t += r;
+				}
+				if (length(l-pos)<0.01) {
+					float r = length(l-o);
+					r = r*r;
+					return 30.0 / r;
+				} else {
+					return 0.0;
+				}
+			}
+
 			vec3 render3d(vec3 o, vec3 d)
 			{
 				vec3 nd = normalize(d);
-				vec3 p = o;
 				float t = 0.0;
 				Material material;
 				const float tmax = 100.0;
@@ -233,11 +267,18 @@ class _View:
 					t += r;
 				}
 
-				if (t < tmax) {
-					return material.albedo + material.emission;
-				} else {
-					return vec3(0.0, 0.0, 0.0);
-				}
+				if (t >= tmax) return vec3(0.0, 0.0, 0.0);
+
+				vec3 pos = o + t*nd;
+				vec3 normal = calc_normal(pos);
+
+				vec3 l0 = o + vec3(0.0, 0.0, -4.0);
+
+				float li = pointlight(pos, l0);
+				li *= dot(normal, normalize(l0-pos));
+				li += 0.15;
+
+				return material.albedo * li + material.emission;
 			}
 			"""
 			))
@@ -342,11 +383,11 @@ class _Node:
 				dvar2 = cg.ident("d")
 				type(self).typd()
 				if self.fn_d21:
-					cg.line("\tfloat %s = %s(%s, %s%s);" % (dvar2, self.fn_d21, self.dvar, dvar1, self.glsl_argstr))
+					cg.line("\tfloat %s = %s(%s, %s%s);" % (dvar2, self.fn_d21, dvar1, self.dvar, self.glsl_argstr))
 				else:
 					u = union.v
 					u.typd()
-					cg.line("\tfloat %s = %s(%s, %s);" % (dvar2, u.fn_d21, self.dvar, dvar1))
+					cg.line("\tfloat %s = %s(%s, %s);" % (dvar2, u.fn_d21, dvar1, self.dvar))
 				self.dvar = dvar2
 
 			if hasattr(o, "mvar"):
@@ -515,6 +556,15 @@ class sphere3(_Leaf):
 	float %(fn)s(vec3 p, float r)
 	{
 		return length(p)-r;
+	}
+	"""
+
+class cylinder3(_Leaf):
+	argfmt = "1"
+	glsl_p3d1 = """
+	float %(fn)s(vec3 p, float r)
+	{
+		return length(p.xz)-r;
 	}
 	"""
 

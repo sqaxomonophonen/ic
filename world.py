@@ -15,6 +15,9 @@ class mg(Material):
 class mb(Material):
 	albedo = (0,0,1)
 
+class mw(Material):
+	albedo = (1,1,1)
+
 @view2d
 def test2():
 	with chain(m0, subtract):
@@ -33,6 +36,9 @@ def testrgb():
 @view3d
 def scene0():
 	r = 0.8
-	with chain(mr,translate3(0, -r, 0)): sphere3(1)
-	with chain(mg,translate3(0,  0, 0)): sphere3(0.8)
-	with chain(mb,translate3(0,  r, 0)): sphere3(1)
+	with subtract:
+		with union:
+			with chain(mr,translate3(0, -r, 0)): sphere3(1)
+			with chain(mg,translate3(0,  0, 0)): sphere3(0.8)
+			with chain(mb,translate3(0,  r, 0)): sphere3(1)
+		cylinder3(0.5)
