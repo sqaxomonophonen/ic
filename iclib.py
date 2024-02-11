@@ -60,8 +60,12 @@ class _Codegen:
 		return name in self.define_set
 
 	def define(self, name, src):
+		assert name not in self.define_set
 		self.define_set.add(name)
 		self.defines.append(src)
+
+	def pushfn(self, fn):
+		self.fns.append(fn)
 
 	def enter(self):
 		self.ident_serials = {}
@@ -77,7 +81,7 @@ class _Codegen:
 		if hasattr(top, "dvar"):
 			self.line("\treturn %s;" % top.dvar)
 		self.line("}")
-		self.fns.append("\n".join(self.lines))
+		self.pushfn("\n".join(self.lines))
 		self.lines = None
 		self.stack = None
 		self.const_map = None
@@ -135,6 +139,7 @@ class _ViewGen:
 class MaterialSet:
 	ff = [
 		("albedo", "vec3"),
+		("emission", "vec3"),
 	]
 	def __init__(self, z):
 		self.z = z
@@ -176,12 +181,66 @@ class _View:
 		_wpp_flush()
 		global _active_codegen, _active_mset
 		_active_codegen = _Codegen()
-		_active_mset = MaterialSet(set(("albedo",)))
+		if self.dim == 2:
+			_active_mset = MaterialSet(set(("albedo",)))
+		elif self.dim == 3:
+			_active_mset = MaterialSet(set(("albedo","emission")))
+		else:
+			assert False, "unreachable"
+
 		if not _active_mset.empty():
 			_active_codegen.define("Material", _active_mset.mktype())
 		_active_codegen.enter_map("map", self.dim)
 		self.ctor()
 		_active_codegen.leave()
+
+		if self.dim == 2:
+			_active_codegen.pushfn(_untab(
+			"""
+			vec3 render2d(vec2 p)
+			{
+				Material material;
+				float d = map(p, material);
+				float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;
+				float m2 = max(0.0, 1.0 - abs(d*0.03));
+				m2 = m2*m2*m2;
+				vec3 c = (d < 0.0) ? material.albedo : vec3(0.2*m2, 0.3*m2, 0.4);
+				vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);
+				float cc = cos(d*3.0);
+				cc = cc*cc*cc*cc*cc*cc*cc*cc*cc;
+				c += cc * a0;
+				return m*c;
+			}
+			"""
+			))
+		elif self.dim == 3:
+			_active_codegen.pushfn(_untab(
+			"""
+			vec3 render3d(vec3 o, vec3 d)
+			{
+				vec3 nd = normalize(d);
+				vec3 p = o;
+				float t = 0.0;
+				Material material;
+				const float tmax = 100.0;
+				for (int i = 0; i < 256; i++) {
+					vec3 pos = o + t*nd;
+					float r = map(pos, material);
+					if (r<0.0001 || t>tmax) break;
+					t += r;
+				}
+
+				if (t < tmax) {
+					return vec3(1.0, 1.0, 1.0);
+				} else {
+					return vec3(0.0, 0.0, 0.0);
+				}
+			}
+			"""
+			))
+		else:
+			assert False, "unreachable"
+
 		source = _active_codegen.source()
 		print(source)
 		_active_codegen = None
@@ -394,6 +453,7 @@ class _Leaf(_Node):
 
 class Material(_Scope):
 	albedo = None
+	emission = None
 	@classmethod
 	def __init_subclass__(subcls, **kwargs):
 		super().__init_subclass__(**kwargs)
@@ -436,6 +496,16 @@ class circle2(_Leaf):
 		return length(p)-r;
 	}
 	"""
+
+class sphere3(_Leaf):
+	argfmt = "1"
+	glsl_p3d1 = """
+	float %(fn)s(vec3 p, float r)
+	{
+		return length(p)-r;
+	}
+	"""
+
 
 @_WithWithoutParentheses
 class union(_Scope):

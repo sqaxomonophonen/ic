@@ -159,12 +159,16 @@ int main(int argc, char** argv)
 				fly_state.dforward = 1;
 			} else if (s && !w) {
 				fly_state.dforward = -1;
+			} else {
+				fly_state.dforward = 0;
 			}
 
 			if (d && !a) {
 				fly_state.dright = 1;
 			} else if (a && !d) {
 				fly_state.dright = -1;
+			} else {
+				fly_state.dright = 0;
 			}
 		}
 

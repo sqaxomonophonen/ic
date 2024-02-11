@@ -212,6 +212,46 @@ static char* read_file(const char* path, size_t* out_size)
 }
 #endif
 
+struct view {
+	const char* name;
+	int dim;
+	GLuint prg0;
+	uint64_t serial;
+};
+
+struct view_window {
+	bool dispose;
+
+	const char* view_name;
+	const char* window_title;
+	int sequence;
+
+	int pixel_size;
+
+	bool gl_initialized;
+	int fb_width, fb_height;
+	GLuint framebuffer;
+	GLuint texture;
+	ImVec2 canvas_size;
+
+	uint64_t serial;
+	uint64_t seen_serial;
+
+	struct {
+		gbVec2 origin;
+		float scale;
+		bool is_panning;
+	} d2;
+
+	struct {
+		gbVec3 origin;
+		float fov;
+		float pitch;
+		float yaw;
+		bool is_flying;
+	} d3;
+};
+
 static struct globals {
 	bool python_initialized;
 	bool python_do_reinitialize;
@@ -224,6 +264,11 @@ static struct globals {
 	double duration_load;
 	double duration_exec;
 	GLuint vao0;
+	struct view_window* flying_view_window;
+	gbVec3 save_origin;
+	float save_pitch;
+	float save_yaw;
+	int flystate;
 } g;
 
 static void watch_file(const char* path)
@@ -269,45 +314,6 @@ static double timer_end(struct timespec t0)
 		((double)(t1.tv_sec) - (double)(t0.tv_sec)) +
 		1e-9 * ((double)(t1.tv_nsec) - (double)(t0.tv_nsec));
 }
-
-struct view {
-	const char* name;
-	int dim;
-	GLuint prg0;
-	uint64_t serial;
-};
-
-struct view_window {
-	bool dispose;
-
-	const char* view_name;
-	const char* window_title;
-	int sequence;
-
-	int pixel_size;
-
-	bool gl_initialized;
-	int fb_width, fb_height;
-	GLuint framebuffer;
-	GLuint texture;
-	ImVec2 canvas_size;
-
-	uint64_t serial;
-	uint64_t seen_serial;
-
-	struct {
-		gbVec2 origin;
-		float scale;
-		bool is_panning;
-	} d2;
-
-	struct {
-		gbVec3 origin;
-		float fov;
-		float pitch;
-		float yaw;
-	} d3;
-};
 
 static struct view* view_arr;
 static struct view_window* view_window_arr;
@@ -414,6 +420,7 @@ static void reload_view(struct view* view)
 			"	}\n"
 			"	gl_Position = vec4(c,0.0,1.0);\n"
 			"}\n"
+
 			,
 
 			// fragment
@@ -429,18 +436,8 @@ static void reload_view(struct view* view)
 			"\n"
 			"void main()\n"
 			"{\n"
-			"	Material material;\n"
-			"	float d = map(v_pos, material);\n"
-			"	float m = d > 0.0 ? min(1.0, 0.6+d*0.1) : 1.0;\n"
-			"	float m2 = max(0.0, 1.0 - abs(d*0.03));\n"
-			"	m2 = m2*m2*m2;\n"
-			//"	vec3 c = (d < 0.0) ? vec3(1.0, 0.9, 0.8) : vec3(0.2*m2, 0.3*m2, 0.4);\n"
-			"	vec3 c = (d < 0.0) ? material.albedo : vec3(0.2*m2, 0.3*m2, 0.4);\n"
-			"	vec3 a0 = (d < 0.0) ? vec3(-0.0, -0.1, -0.2) : vec3(0.02, -0.03, -0.03);\n"
-			"	float cc = cos(d*3.0);\n"
-			"	cc = cc*cc*cc*cc*cc*cc*cc*cc*cc;\n"
-			"	c += cc * a0;\n"
-			"	frag_color = vec4(m*c, 1.0);\n"
+			"	vec3 c = render2d(v_pos);\n"
+			"	frag_color = vec4(c, 1.0);\n"
 			"}\n"
 		};
 
@@ -457,7 +454,69 @@ static void reload_view(struct view* view)
 		}
 
 	} else if (view->dim == 3) {
-		assert(!"TODO 3D"); // XXX
+		const char* sources[] = {
+
+			// vertex
+			"#version 460\n"
+			"\n"
+			//"layout (location = 0) uniform vec3 u_origin;\n"
+			"layout (location = 1) uniform vec3 u_view_dir;\n"
+			"layout (location = 2) uniform vec3 u_view_u;\n"
+			"layout (location = 3) uniform vec3 u_view_v;\n"
+			"\n"
+			"out vec3 v_dir;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	vec2 c;\n"
+			"	if (" IS_Q0 ") {\n"
+			"		c = vec2(-1.0, -1.0);\n"
+			"	} else if (" IS_Q1 ") {\n"
+			"		c = vec2( 1.0, -1.0);\n"
+			"	} else if (" IS_Q2 ") {\n"
+			"		c = vec2( 1.0,  1.0);\n"
+			"	} else if (" IS_Q3 ") {\n"
+			"		c = vec2(-1.0,  1.0);\n"
+			"	}\n"
+			"	v_dir = u_view_dir + c.x*u_view_u + c.y*u_view_v;\n"
+			"	gl_Position = vec4(c,0.0,1.0);\n"
+			"}\n"
+
+			,
+
+			// fragment
+			"#version 460\n"
+			"\n"
+			,
+			source
+			,
+			"\n"
+			"layout (location = 0) uniform vec3 u_origin;\n"
+			"\n"
+			"in vec3 v_dir;\n"
+			"\n"
+			"layout (location = 0) out vec4 frag_color;\n"
+			"\n"
+			"void main()\n"
+			"{\n"
+			"	vec3 c = render3d(u_origin, v_dir);\n"
+			"	frag_color = vec4(c, 1.0);\n"
+			"}\n"
+		};
+
+		GLuint new_prg = mk_render_program(1, 3, sources);
+		if (has_glsl_error) {
+			snprintf(g.error_message, sizeof g.error_message, "[GLSL ERROR] %s", glsl_error);
+			g.has_error = true;
+		} else {
+			if (view->prg0) {
+				glDeleteProgram(view->prg0); CHKGL;
+			}
+			view->prg0 = new_prg;
+			view->serial = next_serial();
+		}
+	} else {
+		assert(!"weird dim");
 	}
 
 	Py_DECREF(psource);
@@ -605,6 +664,7 @@ static void window_view(struct view_window* vw)
 		if (dim == 3) {
 			if (ImGui::Button("Fly")) {
 				fly_enable(true);
+				g.flying_view_window = vw;
 			}
 			ImGui::SameLine();
 		}
@@ -726,8 +786,18 @@ static void open_view_window(struct view* view)
 		.view_name = cstrdup(view->name),
 		.window_title = cstrdup(wt),
 		.sequence = sequence,
-		.d2 = { .scale = 0.03, },
 	};
+	switch (view->dim) {
+	case 2:
+		memset(&vw.d2, 0, sizeof vw.d2);
+		vw.d2.scale = 0.03f;
+		break;
+	case 3:
+		memset(&vw.d3, 0, sizeof vw.d3);
+		vw.d3.fov = gb_to_radians(90);
+		break;
+	default: assert(!"bad dim");
+	}
 	arrput(view_window_arr, vw);
 }
 
@@ -851,8 +921,110 @@ static void window_main(void)
 	}
 }
 
+static void view33(struct view_window* vw, gbVec3* out_view_forward, gbVec3* out_view_right, gbVec3* out_view_up)
+{
+	gbVec3 o = vw->d3.origin;
+	const float pitch = vw->d3.pitch;
+	const float yaw = vw->d3.yaw;
+	const float cos_pitch = cosf(pitch);
+	const float sin_pitch = sinf(pitch);
+	const float cos_yaw = cosf(yaw);
+	const float sin_yaw = sinf(yaw);
+
+	if (out_view_forward != NULL) {
+		*out_view_forward = gb_vec3(
+			cos_pitch * cos_yaw,
+			cos_pitch * sin_yaw,
+			sin_pitch);
+	}
+
+	if (out_view_right != NULL) {
+		*out_view_right = gb_vec3(
+			-sin_yaw,
+			 cos_yaw,
+			 0.0f);
+	}
+
+	if (out_view_up != NULL) {
+		*out_view_up = gb_vec3(
+			-sin_pitch * cos_yaw,
+			-sin_pitch * sin_yaw,
+			cos_pitch);
+	}
+}
+
+static void handle_flying(void)
+{
+	struct fly_state* fs = get_fly_state();
+	if (fs == NULL) {
+		g.flystate = 0;
+		g.flying_view_window = NULL;
+		return;
+	}
+
+	struct view_window* vw = g.flying_view_window;
+	if (vw == NULL) return;
+
+	if (g.flystate == 0) {
+		g.save_origin = vw->d3.origin;
+		g.save_pitch = vw->d3.pitch;
+		g.save_yaw = vw->d3.yaw;
+		g.flystate = 1;
+	}
+
+	bool changed = false;
+
+	#if 0
+	printf("pos %f %f %f\n",
+		vw->d3.origin.x,
+		vw->d3.origin.y,
+		vw->d3.origin.z);
+	#endif
+
+	if (fs->cancel) {
+		vw->d3.origin = g.save_origin;
+		vw->d3.pitch = g.save_pitch;
+		vw->d3.yaw = g.save_yaw;
+		changed = true;
+	} else {
+		const float sens = 0.01f;
+		const float dyaw = fs->dyaw * sens;
+		if (dyaw != 0.0f) changed = true;
+		const float dpitch = fs->dpitch * sens;
+		if (dpitch != 0.0f) changed = true;
+		vw->d3.yaw += dyaw;
+		vw->d3.pitch += dpitch;
+
+		if (fs->dforward != 0 || fs->dright != 0) {
+			gbVec3 forward, right, up;
+			view33(vw, &forward, &right, NULL);
+
+			const float unit = 0.1f;
+			const float step = unit * powf(2.5f, (float)fs->speed);
+
+			if (fs->dforward) {
+				gbVec3 v = forward;
+				gb_vec3_muleq(&v, step * (float)fs->dforward);
+				gb_vec3_add(&vw->d3.origin, vw->d3.origin, v);
+				changed = true;
+			}
+
+			if (fs->dright) {
+				gbVec3 v = right;
+				gb_vec3_muleq(&v, step * (float)fs->dright);
+				gb_vec3_add(&vw->d3.origin, vw->d3.origin, v);
+				changed = true;
+			}
+		}
+	}
+
+	if (changed) vw->serial = next_serial();
+}
+
 void iced_gui(void)
 {
+	handle_flying();
+
 	for (int i0 = 0; i0 < arrlen(view_window_arr); i0++) {
 		struct view_window* vw = &view_window_arr[i0];
 		if (vw->dispose) {
@@ -981,7 +1153,16 @@ void iced_render(void)
 				glUniform2f(0, x0, y0);
 				glUniform2f(1, x1, y1);
 			} else if (view->dim == 3) {
-				assert(!"TODO dim=3");
+				gbVec3 view_dir, view_u, view_v;
+				view33(vw, &view_dir, &view_u, &view_v);
+				float fov = vw->d3.fov;
+				const float su = tanf(fov*0.5f);
+				gb_vec3_muleq(&view_u, su);
+				gb_vec3_muleq(&view_v, (su / (float)fb_width) * (float)fb_height);
+				glUniform3fv(0, 1, vw->d3.origin.e);
+				glUniform3fv(1, 1, view_dir.e);
+				glUniform3fv(2, 1, view_u.e);
+				glUniform3fv(3, 1, view_v.e);
 			} else {
 				assert(!"bad");
 			}
