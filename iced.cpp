@@ -794,7 +794,8 @@ static void open_view_window(struct view* view)
 		break;
 	case 3:
 		memset(&vw.d3, 0, sizeof vw.d3);
-		vw.d3.fov = gb_to_radians(90);
+		vw.d3.fov = gb_to_radians(105);
+		vw.d3.origin = gb_vec3(-10,0,0);
 		break;
 	default: assert(!"bad dim");
 	}
@@ -987,7 +988,7 @@ static void handle_flying(void)
 		vw->d3.yaw = g.save_yaw;
 		changed = true;
 	} else {
-		const float sens = 0.01f;
+		const float sens = 0.005f;
 		const float dyaw = fs->dyaw * sens;
 		if (dyaw != 0.0f) changed = true;
 		const float dpitch = fs->dpitch * sens;

@@ -32,4 +32,7 @@ def testrgb():
 
 @view3d
 def scene0():
-	sphere3(1)
+	r = 0.8
+	with chain(mr,translate3(0, -r, 0)): sphere3(1)
+	with chain(mg,translate3(0,  0, 0)): sphere3(0.8)
+	with chain(mb,translate3(0,  r, 0)): sphere3(1)

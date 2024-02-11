@@ -155,6 +155,7 @@ class MaterialSet:
 
 	def format(self, material):
 		s = "Material("
+		first = True
 		for (nam,typ) in self.ff:
 			if not nam in self.z: continue
 			a = None
@@ -165,7 +166,9 @@ class MaterialSet:
 				x = "vec3(0.0,0.0,0.0)"
 				if a is not None:
 					x = "vec3(%f,%f,%f)" % a
+				if not first: s += ", "
 				s += x
+				first = False
 			else:
 				assert False, "no handler for typ=%s" % typ
 		s += ")"
@@ -231,7 +234,7 @@ class _View:
 				}
 
 				if (t < tmax) {
-					return vec3(1.0, 1.0, 1.0);
+					return material.albedo + material.emission;
 				} else {
 					return vec3(0.0, 0.0, 0.0);
 				}
@@ -494,6 +497,15 @@ class circle2(_Leaf):
 	float %(fn)s(vec2 p, float r)
 	{
 		return length(p)-r;
+	}
+	"""
+
+class translate3(_Scope):
+	argfmt = "3"
+	glsl_p22 = """
+	vec3 %(fn)s(vec3 p, vec3 r)
+	{
+		return p+r;
 	}
 	"""
 
