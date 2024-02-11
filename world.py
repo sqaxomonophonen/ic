@@ -46,3 +46,13 @@ def scene0():
 	with chain(mw, translate3(0,0,3)): box3(0.2,1,2)
 	with chain(mw, translate3(0,0,0)): torus3(3,0.1)
 	with chain(mw, translate3(0,0,0)): cappedtorus3((1,0), 3.0, 0.1)
+
+@view3d
+def stresstest0():
+	r = 0.5
+	n = 5
+	with mw:
+		for x in range(n):
+			for y in range(n):
+				for z in range(n):
+					with translate3(x,y,z): sphere3(1)
