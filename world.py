@@ -11,6 +11,7 @@ class mr(Material):
 
 class mg(Material):
 	albedo = (0,1,0)
+	emission = (0.5,0.5,0.5)
 
 class mb(Material):
 	albedo = (0,0,1)
@@ -42,3 +43,6 @@ def scene0():
 			with chain(mg,translate3(0,  0, 0)): sphere3(0.8)
 			with chain(mb,translate3(0,  r, 0)): sphere3(1)
 		cylinder3(0.5)
+	with chain(mw, translate3(0,0,3)): box3(0.2,1,2)
+	with chain(mw, translate3(0,0,0)): torus3(3,0.1)
+	with chain(mw, translate3(0,0,0)): cappedtorus3((1,0), 3.0, 0.1)

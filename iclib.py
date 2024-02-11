@@ -559,12 +559,43 @@ class sphere3(_Leaf):
 	}
 	"""
 
+class box3(_Leaf):
+	argfmt = "3"
+	glsl_p3d1 = """
+	float %(fn)s(vec3 p, vec3 b)
+	{
+		vec3 q = abs(p) - b;
+		return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+	}
+	"""
+
 class cylinder3(_Leaf):
 	argfmt = "1"
 	glsl_p3d1 = """
 	float %(fn)s(vec3 p, float r)
 	{
 		return length(p.xz)-r;
+	}
+	"""
+
+class torus3(_Leaf):
+	argfmt = "11"
+	glsl_p3d1 = """
+	float %(fn)s(vec3 p, float r0, float r1)
+	{
+		vec2 q = vec2(length(p.xz)-r0,p.y);
+		return length(q)-r1;
+	}
+	"""
+
+class cappedtorus3(_Leaf):
+	argfmt = "211"
+	glsl_p3d1 = """
+	float %(fn)s(vec3 p, vec2 sc, float ra, float rb)
+	{
+		p.x = abs(p.x);
+		float k = (sc.y*p.x>sc.x*p.y) ? dot(p.xy,sc) : length(p.xy);
+		return sqrt( dot(p,p) + ra*ra - 2.0*ra*k ) - rb;
 	}
 	"""
 
